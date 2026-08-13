@@ -1414,6 +1414,7 @@
         </table>
       </div>
       <button type="button" class="secondary small" onclick="adicionarLinhaCompra()" style="margin-top:8px;">+ Adicionar produto</button>
+      <button type="button" class="secondary small" onclick="abrirNovoProdutoDeCompra()" style="margin-top:8px;">+ Novo produto</button>
     </div>
     <div class="hint" id="compraErro" style="margin-top:8px;"></div>
     <div class="totals-line"><span>Total da compra</span><span id="compraTotalValor">R$ 0,00</span></div>
@@ -3850,11 +3851,15 @@ function coletarDadosRelatorio(dataInicio, dataFim){
   const cartao = itens.filter(l => l.tipo === 'cartao');
   const investimentos = itens.filter(l => l.tipo === 'investimento');
   const vendas = itens.filter(l => l.tipo === 'venda');
+  const compras = itens.filter(l => l.tipo === 'compra');
 
   // Vendas contam como receita, junto com os lançamentos tipo "receita" — do ponto de vista de
-  // caixa, uma venda é uma entrada de dinheiro igual a qualquer outra receita.
+  // caixa, uma venda é uma entrada de dinheiro igual a qualquer outra receita. Compras contam
+  // como despesa da mesma forma (dinheiro que saiu do caixa) — mas ficam de fora do cálculo de
+  // margem (calcularMargens abaixo recebe só "despesas", nunca "compras"), pra não confundir
+  // custo de mercadoria vendida (CMV, já calculado por venda) com o valor pago na compra.
   const totalReceitas = receitas.reduce((s,l) => s + Number(l.valor), 0) + vendas.reduce((s,l) => s + Number(l.valor), 0);
-  const totalDespesas = despesas.reduce((s,l) => s + Number(l.valor), 0);
+  const totalDespesas = despesas.reduce((s,l) => s + Number(l.valor), 0) + compras.reduce((s,l) => s + Number(l.valor), 0);
   const totalCartao = cartao.reduce((s,l) => s + Number(l.valor), 0);
   const totalInvestido = investimentos.reduce((s,l) => s + Number(l.valor), 0);
 
@@ -3868,6 +3873,9 @@ function coletarDadosRelatorio(dataInicio, dataFim){
   const resultado = {
     meses,
     totalReceitas, totalDespesas, resultado: totalReceitas - totalDespesas,
+    // Só despesa "pura" (sem compras de estoque) — usado no cálculo de margem, que já conta o
+    // custo da mercadoria vendida (CMV) separadamente e não deve somar compras de novo.
+    totalDespesasOperacionais: despesas.reduce((s,l) => s + Number(l.valor), 0),
     totalCartao, totalInvestido,
     orcamentoTotal, gastoOrcamento,
     receitasPorCategoria: agruparPorCampo(receitas, 'categoria', 'Outros'),
@@ -3882,11 +3890,16 @@ function coletarDadosRelatorio(dataInicio, dataFim){
     resultado.vendasPorProduto = agruparVendasPorProduto(vendas);
     resultado.pj = calcularMargens(vendas, despesas);
   }
+  if(compras.length){
+    resultado.compras = compras;
+    resultado.totalCompras = compras.reduce((s,l) => s + Number(l.valor), 0);
+    resultado.comprasPorProduto = agruparVendasPorProduto(compras);
+  }
   return resultado;
 }
 
-// Agrupa os itens de todas as vendas do período por produto (quantidade total e valor total
-// vendido), pra mostrar no relatório e no fechamento do mês.
+// Agrupa os itens de uma lista de lançamentos (vendas OU compras — mesmo formato de itens[]) por
+// produto, somando quantidade e valor total, pra mostrar no relatório e no fechamento do mês.
 function agruparVendasPorProduto(vendas){
   const porProduto = {};
   vendas.forEach(v => {
@@ -3983,8 +3996,9 @@ async function gerarRelatorioPDF(){
       startY: 30,
       head: [['Resumo do período', 'Valor']],
       body: [
-        ['Receitas', fmt(r.totalReceitas)],
-        ['Despesas', fmt(r.totalDespesas)],
+        ['Receitas (inclui vendas)', fmt(r.totalReceitas)],
+        ['Despesas (inclui compras de estoque)', fmt(r.totalDespesas)],
+        ['Compras de estoque', fmt(r.totalCompras || 0)],
         ['Resultado (Receitas - Despesas)', fmt(r.resultado)],
         ['Compras no cartão', fmt(r.totalCartao)],
         ['Investido (Pé de meia)', fmt(r.totalInvestido)],
@@ -4034,6 +4048,17 @@ async function gerarRelatorioPDF(){
       }
     }
 
+    if(r.comprasPorProduto && r.comprasPorProduto.length){
+      if(y > 260){ doc.addPage(); y = 18; }
+      doc.autoTable(estilosTabelaRelatorio(escuro, {
+        startY: y,
+        head: [['Compras de estoque por produto', 'Qtd', 'Valor']],
+        body: r.comprasPorProduto.map(p => [p.nome, p.quantidade, fmt(p.valor)]),
+        theme: 'grid'
+      }));
+      y = doc.lastAutoTable.finalY + 10;
+    }
+
     if(r.itensOrdenados.length){
       doc.addPage();
       doc.setFontSize(13);
@@ -4079,8 +4104,9 @@ async function gerarRelatorioExcel(){
       ['Relatório financeiro', tituloPeriodo],
       [],
       ['Resumo do período', 'Valor'],
-      ['Receitas', r.totalReceitas],
-      ['Despesas', r.totalDespesas],
+      ['Receitas (inclui vendas)', r.totalReceitas],
+      ['Despesas (inclui compras de estoque)', r.totalDespesas],
+      ['Compras de estoque', r.totalCompras || 0],
       ['Resultado (Receitas - Despesas)', r.resultado],
       ['Compras no cartão', r.totalCartao],
       ['Investido (Pé de meia)', r.totalInvestido],
@@ -4118,6 +4144,11 @@ async function gerarRelatorioExcel(){
         const vendasAoa = [['Produto', 'Qtd', 'Valor']].concat(r.vendasPorProduto.map(p => [p.nome, p.quantidade, p.valor]));
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(vendasAoa), 'Vendas por produto');
       }
+    }
+
+    if(r.comprasPorProduto && r.comprasPorProduto.length){
+      const comprasAoa = [['Produto', 'Qtd', 'Valor']].concat(r.comprasPorProduto.map(p => [p.nome, p.quantidade, p.valor]));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(comprasAoa), 'Compras por produto');
     }
 
     const lancAoa = [['Data', 'Tipo', 'Categoria', 'Descrição', 'Valor']].concat(
@@ -5737,6 +5768,17 @@ function fecharFormProduto(){
   document.getElementById('produtoFormModal').style.display = 'none';
   liberarScrollFundo();
   editingProdutoId = null;
+  criandoProdutoParaCompra = false;
+}
+
+// Quando o produto é criado a partir do botão "+ Novo produto" de dentro da tela de Compra, ao
+// salvar volta pra Compra com uma linha nova já apontando pra esse produto — sem isso a pessoa
+// precisaria ir até o Estoque cadastrar o produto e voltar pra lançar a compra dele.
+let criandoProdutoParaCompra = false;
+function abrirNovoProdutoDeCompra(){
+  criandoProdutoParaCompra = true;
+  abrirFormProduto(null);
+  document.getElementById('produtoQuantidade').value = 0;
 }
 
 document.getElementById('produtoForm').addEventListener('submit', function(e){
@@ -5749,15 +5791,22 @@ document.getElementById('produtoForm').addEventListener('submit', function(e){
   const quantidade = Number(document.getElementById('produtoQuantidade').value);
   if(!nome || quantidade < 0 || custoUnitario < 0 || precoVenda < 0) return;
   if(!data.produtos) data.produtos = [];
+  let produtoCriado = null;
   if(editingProdutoId){
     const produto = data.produtos.find(p => p.id === editingProdutoId);
     if(produto) Object.assign(produto, { nome, unidade, tamanho, custoUnitario, precoVenda, quantidade });
   } else {
-    data.produtos.push({ id: uid(), nome, unidade, tamanho, custoUnitario, precoVenda, quantidade, criadoEm: new Date().toISOString() });
+    produtoCriado = { id: uid(), nome, unidade, tamanho, custoUnitario, precoVenda, quantidade, criadoEm: new Date().toISOString() };
+    data.produtos.push(produtoCriado);
   }
   saveData();
   renderEstoque();
+  const vinhaDeCompra = criandoProdutoParaCompra;
   fecharFormProduto();
+  if(produtoCriado && vinhaDeCompra){
+    compraLinhas.push({ produtoId: produtoCriado.id, quantidade: 1, custoUnitario: produtoCriado.custoUnitario });
+    renderCompraLinhas();
+  }
 });
 
 function excluirProduto(id){
@@ -6065,7 +6114,7 @@ function renderCompraLinhas(){
   const body = document.getElementById('compraItensBody');
   const produtos = data.produtos || [];
   if(produtos.length === 0){
-    body.innerHTML = '<tr><td colspan="7" class="empty">Cadastre um produto no Estoque antes de lançar uma compra.</td></tr>';
+    body.innerHTML = '<tr><td colspan="7" class="empty">Nenhum produto ainda — use "+ Novo produto" para cadastrar um.</td></tr>';
     document.getElementById('compraTotalValor').textContent = fmt(0);
     return;
   }
@@ -6197,13 +6246,15 @@ function renderFechamentoMensal(){
   const dataInicio = mk + '-01';
   const dataFim = ultimoDiaDoMes(mk);
   const r = coletarDadosRelatorio(dataInicio, dataFim);
-  const pj = r.pj || { receitaVendas: 0, cmv: 0, margemBrutaValor: 0, margemBrutaPct: 0, totalDespesas: r.totalDespesas, margemLiquidaValor: -r.totalDespesas, margemLiquidaPct: 0 };
+  const despesasOp = r.totalDespesasOperacionais || 0;
+  const pj = r.pj || { receitaVendas: 0, cmv: 0, margemBrutaValor: 0, margemBrutaPct: 0, totalDespesas: despesasOp, margemLiquidaValor: -despesasOp, margemLiquidaPct: 0 };
   const valorEstoqueAtual = (data.produtos || []).reduce((s,p) => s + Number(p.quantidade) * Number(p.custoUnitario), 0);
   document.getElementById('fechamentoBody').innerHTML = `
     <div class="totals-line"><span>Receita bruta (vendas)</span><span class="pos">${fmt(pj.receitaVendas)}</span></div>
     <div class="totals-line"><span>CMV</span><span class="neg">${fmt(pj.cmv)}</span></div>
     <div class="totals-line"><span>Margem bruta</span><span>${fmt(pj.margemBrutaValor)} (${pj.margemBrutaPct.toFixed(1)}%)</span></div>
     <div class="totals-line"><span>Despesas</span><span class="neg">${fmt(pj.totalDespesas)}</span></div>
+    <div class="totals-line"><span>Compras de estoque</span><span class="neg">${fmt(r.totalCompras || 0)}</span></div>
     <div class="totals-line"><span>Margem líquida</span><span>${fmt(pj.margemLiquidaValor)} (${pj.margemLiquidaPct.toFixed(1)}%)</span></div>
     <div class="totals-line"><span>Valor em estoque (hoje)</span><span>${fmt(valorEstoqueAtual)}</span></div>`;
 }
