@@ -1200,8 +1200,14 @@
       </span>
     </h2>
     <div class="panel-body">
-    <div id="estoqueList"></div>
-    <div class="totals-line"><span>Valor total em estoque</span><span id="estoqueTotal" class="blur-target">R$ 0,00</span></div>
+    <div class="totals-line" style="margin-bottom:0;">
+      <span id="estoqueResumo">Nenhum produto cadastrado</span>
+      <button type="button" class="secondary small" id="toggleEstoqueListBtn" onclick="toggleEstoqueList()">Ver produtos</button>
+    </div>
+    <div id="estoqueListWrap" style="display:none; margin-top:10px;">
+      <div id="estoqueList"></div>
+      <div class="totals-line"><span>Valor total em estoque</span><span id="estoqueTotal" class="blur-target">R$ 0,00</span></div>
+    </div>
     </div>
   </div>
 </div>
@@ -5551,6 +5557,19 @@ function renderEstoque(){
   }
   const total = itens.reduce((s,p) => s + Number(p.quantidade) * Number(p.custoUnitario), 0);
   document.getElementById('estoqueTotal').textContent = fmt(total);
+  document.getElementById('estoqueResumo').textContent = itens.length === 0
+    ? 'Nenhum produto cadastrado'
+    : itens.length + (itens.length === 1 ? ' produto' : ' produtos') + ' • ' + fmt(total) + ' em estoque';
+}
+
+// Mantém a lista de produtos fechada por padrão pra não poluir a Home com muita informação —
+// só o resumo (quantidade e valor total) fica sempre visível.
+function toggleEstoqueList(){
+  const wrap = document.getElementById('estoqueListWrap');
+  const btn = document.getElementById('toggleEstoqueListBtn');
+  const aberto = wrap.style.display !== 'none';
+  wrap.style.display = aberto ? 'none' : 'block';
+  btn.textContent = aberto ? 'Ver produtos' : 'Ocultar produtos';
 }
 
 let editingProdutoId = null;
