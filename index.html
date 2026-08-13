@@ -1379,7 +1379,7 @@
     <div id="vendaItensWrap">
       <div class="tbl-wrap">
         <table>
-          <thead><tr><th>Produto</th><th>Disponível</th><th>Qtd. vendida</th><th>Preço unit.</th><th>Subtotal</th><th></th></tr></thead>
+          <thead><tr><th>Produto</th><th>Tamanho</th><th>Disponível</th><th>Qtd. vendida</th><th>Preço unit.</th><th>Subtotal</th><th></th></tr></thead>
           <tbody id="vendaItensBody"></tbody>
         </table>
       </div>
@@ -1408,7 +1408,7 @@
     <div id="compraItensWrap">
       <div class="tbl-wrap">
         <table>
-          <thead><tr><th>Produto</th><th>Estoque atual</th><th>Qtd. comprada</th><th>Custo unit.</th><th>Subtotal</th><th></th></tr></thead>
+          <thead><tr><th>Produto</th><th>Tamanho</th><th>Estoque atual</th><th>Qtd. comprada</th><th>Custo unit.</th><th>Subtotal</th><th></th></tr></thead>
           <tbody id="compraItensBody"></tbody>
         </table>
       </div>
@@ -3106,10 +3106,19 @@ let razaoFiltroNome = null;
 // velhos qualquer coisa salva nesse meio-tempo por outra sessão.
 function saveData(){
   if(!docRef) return;
-  const docRefAtual = docRef;
-  const revEsperada = lastKnownRev;
-  data._rev = (revEsperada || 0) + 1;
   const payload = JSON.parse(JSON.stringify(data));
+  tentarSalvarComRetry(docRef, payload, lastKnownRev, 0);
+}
+
+// Tenta gravar o documento inteiro, protegido contra sobrescrever uma versão mais nova salva por
+// outra aba/aparelho (checagem de _rev). Antes, um conflito só emitia um aviso no console e
+// descartava a gravação em silêncio — o problema real é que duas ações do PRÓPRIO usuário em
+// sequência rápida (ex: criar um banco e, na sequência, salvar um lançamento) também disparam
+// esse conflito entre si, e a pessoa via sua última alteração simplesmente sumir sem explicação.
+// Agora tenta de novo automaticamente (a revisão mais atual já deve ter chegado via onSnapshot)
+// antes de desistir e avisar de verdade.
+function tentarSalvarComRetry(docRefAtual, payload, revEsperada, tentativa){
+  payload._rev = (revEsperada || 0) + 1;
   db.runTransaction(function(tx){
     return tx.get(docRefAtual).then(function(snap){
       const revServidor = snap.exists ? (snap.data()._rev || 0) : 0;
@@ -3122,7 +3131,12 @@ function saveData(){
     lastKnownRev = payload._rev;
   }).catch(function(err){
     if(err && err.message === 'BROTO_SYNC_CONFLICT'){
-      console.warn('Não salvou: havia uma versão mais nova no servidor (outra aba/dispositivo). Os dados na tela vão atualizar automaticamente.');
+      if(tentativa < 2){
+        setTimeout(() => tentarSalvarComRetry(docRefAtual, payload, lastKnownRev, tentativa + 1), 400);
+      } else {
+        console.warn('Não salvou: havia uma versão mais nova no servidor (outra aba/dispositivo).');
+        alert('Não deu pra salvar sua última alteração agora (havia uma versão mais nova dos seus dados salva por outra aba ou aparelho). Confira e tente de novo.');
+      }
     } else {
       console.error('Erro ao salvar:', err);
     }
@@ -3287,9 +3301,18 @@ function adicionarBancoForma(){
     return;
   }
   data.formasContaExtras.push(nomeTrim);
-  saveData();
   populateFormaContaSelect();
   document.getElementById('lancFormaConta').value = nomeTrim;
+  // Grava só este campo direto no Firestore (arrayUnion) em vez de usar o saveData() genérico,
+  // que reescreve o documento inteiro e pode falhar em silêncio se outra gravação (outra aba,
+  // outro salvamento quase ao mesmo tempo) mudou a revisão nesse meio-tempo — assim, criar um
+  // banco nunca se perde por causa dessa corrida.
+  if(docRef){
+    docRef.update({ formasContaExtras: firebase.firestore.FieldValue.arrayUnion(nomeTrim) }).catch(err => {
+      console.error('Erro ao salvar novo banco:', err);
+      alert('Não foi possível salvar o novo banco agora. Verifique sua conexão e tente de novo.');
+    });
+  }
 }
 
 function excluirBancoFormaSelecionado(){
@@ -3304,8 +3327,15 @@ function excluirBancoFormaSelecionado(){
   }
   if(!confirm('Excluir "' + atual + '"? Lançamentos que já usam esse nome continuam existindo, só deixa de aparecer como opção nova.')) return;
   data.formasContaExtras = (data.formasContaExtras || []).filter(f => f !== atual);
-  saveData();
   populateFormaContaSelect();
+  // Mesma gravação direta e atômica (arrayRemove) usada em adicionarBancoForma, pelo mesmo
+  // motivo: evita que a exclusão se perca numa corrida com outro salvamento quase simultâneo.
+  if(docRef){
+    docRef.update({ formasContaExtras: firebase.firestore.FieldValue.arrayRemove(atual) }).catch(err => {
+      console.error('Erro ao excluir banco:', err);
+      alert('Não foi possível excluir agora. Verifique sua conexão e tente de novo.');
+    });
+  }
 }
 
 // ---------- Metas de Investimento (ex: "Viagem" R$ 30.000,00) ----------
@@ -5800,11 +5830,27 @@ function removerLinhaVenda(idx){
   renderVendaLinhas();
 }
 
+// Nomes de produto distintos e as variantes (tamanhos) de um nome — usados para separar "qual
+// produto" de "qual tamanho" em dois seletores, em vez de misturar tudo numa opção só.
+function nomesProdutosUnicos(){
+  return Array.from(new Set((data.produtos || []).map(p => p.nome))).sort();
+}
+function produtosComNome(nome){
+  return (data.produtos || []).filter(p => p.nome === nome);
+}
+
 function mudarProdutoLinhaVenda(idx, produtoId){
   const produto = (data.produtos || []).find(p => p.id === produtoId);
   vendaLinhas[idx].produtoId = produtoId;
   vendaLinhas[idx].precoUnitario = produto ? Number(produto.precoVenda) : 0;
   renderVendaLinhas();
+}
+
+// Trocar o nome do produto reseta pro primeiro tamanho disponível daquele nome — o segundo
+// seletor (tamanho) então lista só as variantes desse nome específico.
+function mudarNomeLinhaVenda(idx, nome){
+  const variantes = produtosComNome(nome);
+  mudarProdutoLinhaVenda(idx, variantes[0] ? variantes[0].id : '');
 }
 
 function mudarQuantidadeLinhaVenda(idx, valor){
@@ -5820,17 +5866,22 @@ function mudarPrecoLinhaVenda(idx, valor){
 function renderVendaLinhas(){
   const body = document.getElementById('vendaItensBody');
   const produtos = data.produtos || [];
+  const nomesUnicos = nomesProdutosUnicos();
   body.innerHTML = vendaLinhas.map((linha, idx) => {
     const produto = produtos.find(p => p.id === linha.produtoId);
+    const nomeAtual = produto ? produto.nome : '';
+    const variantes = nomeAtual ? produtosComNome(nomeAtual) : [];
     const disponivel = produto ? produto.quantidade : 0;
     const subtotal = Number(linha.quantidade || 0) * Number(linha.precoUnitario || 0);
-    const opcoesProduto = produtos.map(p => `<option value="${p.id}" ${p.id === linha.produtoId ? 'selected' : ''}>${p.nome}${p.tamanho ? ' (' + p.tamanho + ')' : ''} — ${p.quantidade} ${p.unidade || 'un'}</option>`).join('');
+    const opcoesNome = nomesUnicos.map(n => `<option value="${n}" ${n === nomeAtual ? 'selected' : ''}>${n}</option>`).join('');
+    const opcoesTamanho = variantes.map(p => `<option value="${p.id}" ${p.id === linha.produtoId ? 'selected' : ''}>${p.tamanho || '—'}</option>`).join('');
     return `
       <tr>
-        <td><select onchange="mudarProdutoLinhaVenda(${idx}, this.value)"><option value="">Selecione...</option>${opcoesProduto}</select></td>
+        <td><select onchange="mudarNomeLinhaVenda(${idx}, this.value)"><option value="">Selecione...</option>${opcoesNome}</select></td>
+        <td><select onchange="mudarProdutoLinhaVenda(${idx}, this.value)" ${!nomeAtual ? 'disabled' : ''}>${opcoesTamanho}</select></td>
         <td>${produto ? disponivel + ' ' + (produto.unidade || 'un') : '-'}</td>
-        <td><input type="number" step="0.01" min="0" value="${linha.quantidade}" onchange="mudarQuantidadeLinhaVenda(${idx}, this.value)" style="width:80px;"></td>
-        <td><input type="number" step="0.01" min="0" value="${linha.precoUnitario}" onchange="mudarPrecoLinhaVenda(${idx}, this.value)" style="width:90px;"></td>
+        <td><input type="number" step="0.01" min="0" value="${linha.quantidade}" onchange="mudarQuantidadeLinhaVenda(${idx}, this.value)" style="width:70px;"></td>
+        <td><input type="number" step="0.01" min="0" value="${linha.precoUnitario}" onchange="mudarPrecoLinhaVenda(${idx}, this.value)" style="width:80px;"></td>
         <td>${fmt(subtotal)}</td>
         <td><button type="button" class="row-menu-danger" onclick="removerLinhaVenda(${idx})">Remover</button></td>
       </tr>`;
@@ -5992,6 +6043,13 @@ function mudarProdutoLinhaCompra(idx, produtoId){
   renderCompraLinhas();
 }
 
+// Trocar o nome do produto reseta pro primeiro tamanho disponível daquele nome — o segundo
+// seletor (tamanho) então lista só as variantes desse nome específico.
+function mudarNomeLinhaCompra(idx, nome){
+  const variantes = produtosComNome(nome);
+  mudarProdutoLinhaCompra(idx, variantes[0] ? variantes[0].id : '');
+}
+
 function mudarQuantidadeLinhaCompra(idx, valor){
   compraLinhas[idx].quantidade = Number(valor);
   renderCompraLinhas();
@@ -6006,20 +6064,25 @@ function renderCompraLinhas(){
   const body = document.getElementById('compraItensBody');
   const produtos = data.produtos || [];
   if(produtos.length === 0){
-    body.innerHTML = '<tr><td colspan="6" class="empty">Cadastre um produto no Estoque antes de lançar uma compra.</td></tr>';
+    body.innerHTML = '<tr><td colspan="7" class="empty">Cadastre um produto no Estoque antes de lançar uma compra.</td></tr>';
     document.getElementById('compraTotalValor').textContent = fmt(0);
     return;
   }
+  const nomesUnicos = nomesProdutosUnicos();
   body.innerHTML = compraLinhas.map((linha, idx) => {
     const produto = produtos.find(p => p.id === linha.produtoId);
+    const nomeAtual = produto ? produto.nome : '';
+    const variantes = nomeAtual ? produtosComNome(nomeAtual) : [];
     const subtotal = Number(linha.quantidade || 0) * Number(linha.custoUnitario || 0);
-    const opcoesProduto = produtos.map(p => `<option value="${p.id}" ${p.id === linha.produtoId ? 'selected' : ''}>${p.nome}${p.tamanho ? ' (' + p.tamanho + ')' : ''}</option>`).join('');
+    const opcoesNome = nomesUnicos.map(n => `<option value="${n}" ${n === nomeAtual ? 'selected' : ''}>${n}</option>`).join('');
+    const opcoesTamanho = variantes.map(p => `<option value="${p.id}" ${p.id === linha.produtoId ? 'selected' : ''}>${p.tamanho || '—'}</option>`).join('');
     return `
       <tr>
-        <td><select onchange="mudarProdutoLinhaCompra(${idx}, this.value)"><option value="">Selecione...</option>${opcoesProduto}</select></td>
+        <td><select onchange="mudarNomeLinhaCompra(${idx}, this.value)"><option value="">Selecione...</option>${opcoesNome}</select></td>
+        <td><select onchange="mudarProdutoLinhaCompra(${idx}, this.value)" ${!nomeAtual ? 'disabled' : ''}>${opcoesTamanho}</select></td>
         <td>${produto ? produto.quantidade + ' ' + (produto.unidade || 'un') : '-'}</td>
-        <td><input type="number" step="0.01" min="0" value="${linha.quantidade}" onchange="mudarQuantidadeLinhaCompra(${idx}, this.value)" style="width:80px;"></td>
-        <td><input type="number" step="0.01" min="0" value="${linha.custoUnitario}" onchange="mudarCustoLinhaCompra(${idx}, this.value)" style="width:90px;"></td>
+        <td><input type="number" step="0.01" min="0" value="${linha.quantidade}" onchange="mudarQuantidadeLinhaCompra(${idx}, this.value)" style="width:70px;"></td>
+        <td><input type="number" step="0.01" min="0" value="${linha.custoUnitario}" onchange="mudarCustoLinhaCompra(${idx}, this.value)" style="width:80px;"></td>
         <td>${fmt(subtotal)}</td>
         <td><button type="button" class="row-menu-danger" onclick="removerLinhaCompra(${idx})">Remover</button></td>
       </tr>`;
