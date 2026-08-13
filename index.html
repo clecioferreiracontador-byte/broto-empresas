@@ -584,6 +584,8 @@
   .score-stat-valor{ font-size:0.78rem; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 
   .conta-forma-box{background:var(--card2); border:1px solid var(--border); border-radius:10px; padding:12px; margin-bottom:10px;}
+  .conta-forma-box.clickable{cursor:pointer; transition:border-color .15s;}
+  .conta-forma-box.clickable:hover{border-color:var(--blue);}
   .conta-forma-box .label{color:var(--muted); font-size:0.72rem; text-transform:uppercase; letter-spacing:.03em;}
   .conta-forma-box .value{font-size:1.1rem; font-weight:700; margin-top:4px;}
   .conta-forma-linhas{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;}
@@ -1168,11 +1170,11 @@
       <div class="hint" id="contaDataDisplay" style="margin-top:6px;"></div>
     </div>
     <div class="conta-forma-linhas" style="margin-top:14px;">
-      <div class="conta-forma-box">
+      <div class="conta-forma-box clickable" onclick="abrirRazao('contaBanco')" title="Ver o que compõe o saldo em Banco, por banco">
         <div class="label">Saldo em Banco</div>
         <div class="value info blur-target" id="contaSaldoBanco">R$ 0,00</div>
       </div>
-      <div class="conta-forma-box">
+      <div class="conta-forma-box clickable" onclick="abrirRazao('contaEspecie')" title="Ver os lançamentos em Espécie">
         <div class="label">Saldo em Espécie</div>
         <div class="value info blur-target" id="contaSaldoEspecie">R$ 0,00</div>
       </div>
@@ -3472,8 +3474,17 @@ function formaDoItem(l){
 }
 function calcularSaldoPorForma(forma){
   const contaEntries = data.lancamentos.filter(l => l.tipo === 'conta' && formaDoItem(l) === forma);
+  // Dentro do bucket "Banco" pode haver vários bancos específicos (Nubank, Itaú, "Banco"
+  // genérico...), cada um com seu próprio ajuste de saldo base — soma o ajuste mais recente de
+  // CADA banco, em vez de considerar só o lançamento tipo conta mais recente do bucket inteiro
+  // (isso perderia a base de qualquer banco que não fosse o último ajustado).
+  const baselinePorNome = {};
+  contaEntries.forEach(l => {
+    const nome = l.forma || forma;
+    if(!baselinePorNome[nome] || l.data >= baselinePorNome[nome].data) baselinePorNome[nome] = l;
+  });
+  const baselineValor = Object.values(baselinePorNome).reduce((s,l) => s + Number(l.valor), 0);
   const baseline = contaEntries.length ? contaEntries.reduce((a,b) => (b.data >= a.data ? b : a)) : null;
-  const baselineValor = baseline ? Number(baseline.valor) : 0;
   const movimentos = data.lancamentos.filter(l => (l.tipo === 'receita' || l.tipo === 'venda' || l.tipo === 'despesa') && formaDoItem(l) === forma);
   const somaMovimentos = movimentos.reduce((s,l) => s + ((l.tipo === 'receita' || l.tipo === 'venda') ? Number(l.valor) : -Number(l.valor)), 0);
   return { saldo: baselineValor + somaMovimentos, baseline, movimentos };
@@ -3492,6 +3503,25 @@ function calcularSaldoContaCorrente(){
     baseline: baselines.length ? baselines.reduce((a,b)=>(b.data>=a.data?b:a)) : null,
     movimentos: banco.movimentos.concat(especie.movimentos)
   };
+}
+
+// "Saldo em Banco" hoje é um único total que soma TODOS os bancos (Nubank, Itaú, "Banco"
+// genérico etc.) — isso detalha o que compõe esse total, banco por banco, com a mesma lógica de
+// saldo base + movimentos usada em calcularSaldoPorForma, só que por cada valor exato de
+// l.forma em vez de agrupar tudo pelo bucket genérico "Banco".
+function saldoPorBancoDetalhado(){
+  const nomes = new Set();
+  data.lancamentos.forEach(l => {
+    if(formaDoItem(l) === 'Banco') nomes.add(l.forma || 'Banco');
+  });
+  return Array.from(nomes).map(nome => {
+    const contaEntries = data.lancamentos.filter(l => l.tipo === 'conta' && (l.forma || 'Banco') === nome);
+    const baseline = contaEntries.length ? contaEntries.reduce((a,b) => (b.data >= a.data ? b : a)) : null;
+    const baselineValor = baseline ? Number(baseline.valor) : 0;
+    const movimentos = data.lancamentos.filter(l => (l.tipo === 'receita' || l.tipo === 'venda' || l.tipo === 'despesa') && (l.forma || 'Banco') === nome);
+    const somaMovimentos = movimentos.reduce((s,l) => s + ((l.tipo === 'receita' || l.tipo === 'venda') ? Number(l.valor) : -Number(l.valor)), 0);
+    return { nome, saldo: baselineValor + somaMovimentos };
+  }).sort((a,b) => b.saldo - a.saldo);
 }
 
 // Cartões: agrupa lançamentos tipo cartao por nome (compras) e cruza com despesas
@@ -5172,6 +5202,13 @@ function getRazaoConfig(key){
     titulo = 'Razão — Conta Corrente (saldo base + receitas/despesas, Banco e Espécie)';
     total = calc.saldo;
     totalLabel = 'Saldo atual (calculado)';
+  } else if(key === 'contaBanco' || key === 'contaEspecie'){
+    const alvoEspecie = key === 'contaEspecie';
+    const calcAlvo = alvoEspecie ? calcularSaldoContaCorrente().especie : calcularSaldoContaCorrente().banco;
+    itens = (calcAlvo.baseline ? [calcAlvo.baseline] : []).concat(calcAlvo.movimentos);
+    titulo = alvoEspecie ? 'Razão — Saldo em Espécie' : 'Razão — Saldo em Banco';
+    total = calcAlvo.saldo;
+    totalLabel = 'Saldo em ' + (alvoEspecie ? 'Espécie' : 'Banco');
   } else if(key === 'cartao'){
     itens = data.lancamentos.filter(l => l.tipo==='cartao' || (l.tipo==='despesa' && l.categoria === 'Cartão de Crédito'));
     if(razaoFiltroNome){
@@ -5300,6 +5337,23 @@ function renderRazaoContent(){
     }
     chartContainer.style.display = 'block';
     renderChartRazaoCartaoCategorias();
+  } else if(razaoAtualKey === 'contaBanco'){
+    // Mostra a composição do "Saldo em Banco" por banco específico (Nubank, Itaú, "Banco"
+    // genérico etc.) antes da lista de lançamentos — sem isso não dava pra saber quanto tinha
+    // em cada banco, só o total somado de todos juntos.
+    const bancos = saldoPorBancoDetalhado();
+    if(bancos.length === 0){
+      resumoEl.innerHTML = '';
+    } else {
+      resumoEl.innerHTML = '<div style="margin-bottom:10px;">' +
+        bancos.map(b => `
+          <div class="list-item">
+            <div>${logoENomeHtml(b.nome)}</div>
+            <span class="${b.saldo >= 0 ? 'info' : 'neg'}">${fmt(b.saldo)}</span>
+          </div>
+        `).join('') + '</div>';
+    }
+    chartContainer.style.display = 'none';
   } else {
     resumoEl.innerHTML = '';
     chartContainer.style.display = 'none';
