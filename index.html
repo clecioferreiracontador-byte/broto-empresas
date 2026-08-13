@@ -160,6 +160,7 @@
   .tag.conta{background:rgba(100,116,139,0.2); color:var(--purple);}
   .tag.investimento{background:rgba(234,179,8,0.15); color:var(--yellow);}
   .tag.venda{background:rgba(20,184,166,0.15); color:#14b8a6;}
+  .tag.compra{background:rgba(99,102,241,0.15); color:#6366f1;}
   .empty{color:var(--muted); font-size:0.85rem; text-align:center; padding:16px 0;}
 
   .chart-box{position:relative; height:260px;}
@@ -1201,10 +1202,10 @@
     <h2><span class="title"><span class="h2-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11v10"/></svg></span> Estoque</span>
       <span class="h2-actions">
         <button class="secondary small" onclick="abrirFormProduto(null)">+ Novo produto</button>
-        <button class="secondary small" onclick="novaVenda()">+ Nova venda</button>
       </span>
     </h2>
     <div class="panel-body">
+    <div class="hint" style="margin-bottom:10px;">Compras e vendas de produtos são lançadas em Lançamentos (tipo Compra/Venda) e atualizam o estoque automaticamente.</div>
     <div class="totals-line" style="margin-bottom:0;">
       <span id="estoqueResumo">Nenhum produto cadastrado</span>
       <button type="button" class="secondary small" id="toggleEstoqueListBtn" onclick="toggleEstoqueList()">Ver produtos</button>
@@ -1240,6 +1241,8 @@
         <option value="cartao">Cartão de Crédito</option>
         <option value="divida">Dívida</option>
         <option value="investimento">Pé de Meia</option>
+        <option value="compra">Compra (estoque)</option>
+        <option value="venda">Venda (estoque)</option>
       </select>
     </div>
     <div class="field" id="fieldFormaConta">
@@ -1385,6 +1388,35 @@
     <div class="hint" id="vendaErro" style="margin-top:8px;"></div>
     <div class="totals-line"><span>Total da venda</span><span id="vendaTotalValor">R$ 0,00</span></div>
     <button type="button" onclick="salvarVenda()">Salvar venda</button>
+  </div>
+</div>
+
+<div id="compraModal" class="page-view">
+  <div class="modal-card view-card" style="max-width:760px;">
+    <div class="modal-header">
+      <h3 id="compraModalTitulo">Nova compra</h3>
+      <button class="secondary small" onclick="irHome()">Voltar</button>
+    </div>
+    <form class="inline" id="compraForm" onsubmit="return false;">
+      <div class="field"><label>Data</label><input type="date" id="compraData" required></div>
+      <div class="field">
+        <label>Espécie ou Banco</label>
+        <select id="compraFormaConta"></select>
+      </div>
+      <div class="field" style="min-width:220px;"><label>Fornecedor (opcional)</label><input type="text" id="compraDescricao"></div>
+    </form>
+    <div id="compraItensWrap">
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>Produto</th><th>Estoque atual</th><th>Qtd. comprada</th><th>Custo unit.</th><th>Subtotal</th><th></th></tr></thead>
+          <tbody id="compraItensBody"></tbody>
+        </table>
+      </div>
+      <button type="button" class="secondary small" onclick="adicionarLinhaCompra()" style="margin-top:8px;">+ Adicionar produto</button>
+    </div>
+    <div class="hint" id="compraErro" style="margin-top:8px;"></div>
+    <div class="totals-line"><span>Total da compra</span><span id="compraTotalValor">R$ 0,00</span></div>
+    <button type="button" onclick="salvarCompra()">Salvar compra</button>
   </div>
 </div>
 
@@ -2127,7 +2159,7 @@ atualizarLabelTema();
 
 // As páginas abertas pela barra inferior (Lançamentos, Orçamento, Provisões, Extratos) substituem
 // a Home em vez de flutuar por cima dela — só uma fica visível por vez, e o botão Home volta para o painel.
-const VIEW_IDS = ['homeView', 'lancamentosModal', 'orcamentoModal', 'provisoesModal', 'extratosModal', 'relatorioModal', 'vendaModal', 'fechamentoModal'];
+const VIEW_IDS = ['homeView', 'lancamentosModal', 'orcamentoModal', 'provisoesModal', 'extratosModal', 'relatorioModal', 'vendaModal', 'compraModal', 'fechamentoModal'];
 const BTN_ID_FOR_VIEW = {
   homeView: 'homeIconBtn',
   lancamentosModal: 'lancamentosIconBtn',
@@ -3114,7 +3146,8 @@ const TAG_INFO = {
   divida: {label:'Dívida', cls:'divida'},
   conta: {label:'Conta Corrente', cls:'conta'},
   investimento: {label:'Pé de Meia', cls:'investimento'},
-  venda: {label:'Venda', cls:'venda'}
+  venda: {label:'Venda', cls:'venda'},
+  compra: {label:'Compra', cls:'compra'}
 };
 
 // Logos dos bancos mais comuns (baixadas do Wikimedia Commons, ver icons/bancos/), mostradas ao
@@ -3485,7 +3518,7 @@ function calcularSaldoPorForma(forma){
   });
   const baselineValor = Object.values(baselinePorNome).reduce((s,l) => s + Number(l.valor), 0);
   const baseline = contaEntries.length ? contaEntries.reduce((a,b) => (b.data >= a.data ? b : a)) : null;
-  const movimentos = data.lancamentos.filter(l => (l.tipo === 'receita' || l.tipo === 'venda' || l.tipo === 'despesa') && formaDoItem(l) === forma);
+  const movimentos = data.lancamentos.filter(l => (l.tipo === 'receita' || l.tipo === 'venda' || l.tipo === 'despesa' || l.tipo === 'compra') && formaDoItem(l) === forma);
   const somaMovimentos = movimentos.reduce((s,l) => s + ((l.tipo === 'receita' || l.tipo === 'venda') ? Number(l.valor) : -Number(l.valor)), 0);
   return { saldo: baselineValor + somaMovimentos, baseline, movimentos };
 }
@@ -3518,7 +3551,7 @@ function saldoPorBancoDetalhado(){
     const contaEntries = data.lancamentos.filter(l => l.tipo === 'conta' && (l.forma || 'Banco') === nome);
     const baseline = contaEntries.length ? contaEntries.reduce((a,b) => (b.data >= a.data ? b : a)) : null;
     const baselineValor = baseline ? Number(baseline.valor) : 0;
-    const movimentos = data.lancamentos.filter(l => (l.tipo === 'receita' || l.tipo === 'venda' || l.tipo === 'despesa') && (l.forma || 'Banco') === nome);
+    const movimentos = data.lancamentos.filter(l => (l.tipo === 'receita' || l.tipo === 'venda' || l.tipo === 'despesa' || l.tipo === 'compra') && (l.forma || 'Banco') === nome);
     const somaMovimentos = movimentos.reduce((s,l) => s + ((l.tipo === 'receita' || l.tipo === 'venda') ? Number(l.valor) : -Number(l.valor)), 0);
     return { nome, saldo: baselineValor + somaMovimentos };
   }).sort((a,b) => b.saldo - a.saldo);
@@ -4975,7 +5008,7 @@ function renderSummary(){
   const monthKey = currentMonthKey();
   const mesItems = data.lancamentos.filter(l => itemInMonth(l, monthKey));
   const receitaMes = mesItems.filter(l=>l.tipo==='receita' || l.tipo==='venda').reduce((s,l)=>s+Number(l.valor),0);
-  const despesaMes = mesItems.filter(l=>l.tipo==='despesa').reduce((s,l)=>s+Number(l.valor),0);
+  const despesaMes = mesItems.filter(l=>l.tipo==='despesa' || l.tipo==='compra').reduce((s,l)=>s+Number(l.valor),0);
   const resultado = receitaMes - despesaMes;
   const saldoConta = calcularSaldoContaCorrente().saldo;
 
@@ -5036,7 +5069,7 @@ function detalheFor(item){
     return partes.join(' • ');
   }
   if(item.tipo === 'conta') return 'Ajuste de saldo base (' + (item.forma || 'Banco') + ')';
-  if(item.tipo === 'venda'){
+  if(item.tipo === 'venda' || item.tipo === 'compra'){
     const partes = (item.itens || []).map(it => it.quantidade + 'x ' + it.produtoNome + (it.produtoTamanho ? ' (' + it.produtoTamanho + ')' : ''));
     return partes.join(', ') + ' • ' + (item.forma || 'Banco');
   }
@@ -5047,7 +5080,7 @@ function linhaLancamentoHtml(item){
   const tag = TAG_INFO[item.tipo] || {label:item.tipo, cls:''};
   const corValor = (item.tipo === 'receita' || item.tipo === 'investimento' || item.tipo === 'venda')
     ? 'pos'
-    : (item.tipo === 'despesa' || item.tipo === 'divida')
+    : (item.tipo === 'despesa' || item.tipo === 'divida' || item.tipo === 'compra')
       ? 'neg'
       : 'info';
   const tooltip = [detalheFor(item), item.descricao].filter(Boolean).join(' — ');
@@ -5098,6 +5131,11 @@ function renderTable(){
 function deleteLancamento(id){
   const item = data.lancamentos.find(l => l.id === id);
   if(item && item.tipo === 'venda') reverterBaixaEstoque(item.itens);
+  if(item && item.tipo === 'compra'){
+    const erroReversao = validarReversaoCompra(item.itens);
+    if(erroReversao){ alert(erroReversao); return; }
+    reverterEntradaEstoque(item.itens);
+  }
   data.lancamentos = data.lancamentos.filter(l => l.id !== id);
   saveData();
   if(editingId === id) cancelEdit();
@@ -5107,6 +5145,7 @@ function deleteLancamento(id){
 function editLancamento(id){
   const itemParaVenda = data.lancamentos.find(l => l.id === id);
   if(itemParaVenda && itemParaVenda.tipo === 'venda'){ editarVenda(id); return; }
+  if(itemParaVenda && itemParaVenda.tipo === 'compra'){ editarCompra(id); return; }
   fecharRazao();
   const item = itemParaVenda;
   if(!item) return;
@@ -5144,6 +5183,8 @@ function cancelEdit(){
 }
 
 function novoLancamento(tipo){
+  if(tipo === 'venda'){ novaVenda(); return; }
+  if(tipo === 'compra'){ novaCompra(); return; }
   fecharRazao();
   cancelEdit();
   if(tipo === 'conta') garantirOpcaoContaTipo();
@@ -5892,6 +5933,192 @@ function salvarVenda(){
   irHome();
 }
 
+// ---------- Compra (dá entrada no estoque e atualiza o custo do produto) ----------
+let compraEditandoId = null;
+let compraLinhas = [];
+
+function novaCompra(){
+  compraEditandoId = null;
+  compraLinhas = [];
+  document.getElementById('compraModalTitulo').textContent = 'Nova compra';
+  document.getElementById('compraData').value = new Date().toISOString().slice(0,10);
+  document.getElementById('compraDescricao').value = '';
+  document.getElementById('compraErro').textContent = '';
+  populateCompraFormaConta();
+  if((data.produtos || []).length){
+    adicionarLinhaCompra();
+  } else {
+    renderCompraLinhas();
+  }
+  mostrarView('compraModal');
+}
+
+function editarCompra(id){
+  const item = data.lancamentos.find(l => l.id === id && l.tipo === 'compra');
+  if(!item) return;
+  compraEditandoId = id;
+  compraLinhas = item.itens.map(it => ({ produtoId: it.produtoId, quantidade: it.quantidade, custoUnitario: it.custoUnitario }));
+  document.getElementById('compraModalTitulo').textContent = 'Editar compra';
+  document.getElementById('compraData').value = item.data;
+  document.getElementById('compraDescricao').value = item.descricao || '';
+  document.getElementById('compraErro').textContent = '';
+  populateCompraFormaConta();
+  document.getElementById('compraFormaConta').value = item.forma || 'Banco';
+  renderCompraLinhas();
+  mostrarView('compraModal');
+}
+
+function populateCompraFormaConta(){
+  const sel = document.getElementById('compraFormaConta');
+  const lista = listaFormasConta();
+  sel.innerHTML = lista.map(f => `<option value="${f}">${f}</option>`).join('');
+}
+
+function adicionarLinhaCompra(){
+  const primeiro = (data.produtos || [])[0];
+  compraLinhas.push({ produtoId: '', quantidade: 1, custoUnitario: primeiro ? Number(primeiro.custoUnitario) : 0 });
+  renderCompraLinhas();
+}
+
+function removerLinhaCompra(idx){
+  compraLinhas.splice(idx, 1);
+  renderCompraLinhas();
+}
+
+function mudarProdutoLinhaCompra(idx, produtoId){
+  const produto = (data.produtos || []).find(p => p.id === produtoId);
+  compraLinhas[idx].produtoId = produtoId;
+  compraLinhas[idx].custoUnitario = produto ? Number(produto.custoUnitario) : 0;
+  renderCompraLinhas();
+}
+
+function mudarQuantidadeLinhaCompra(idx, valor){
+  compraLinhas[idx].quantidade = Number(valor);
+  renderCompraLinhas();
+}
+
+function mudarCustoLinhaCompra(idx, valor){
+  compraLinhas[idx].custoUnitario = Number(valor);
+  renderCompraLinhas();
+}
+
+function renderCompraLinhas(){
+  const body = document.getElementById('compraItensBody');
+  const produtos = data.produtos || [];
+  if(produtos.length === 0){
+    body.innerHTML = '<tr><td colspan="6" class="empty">Cadastre um produto no Estoque antes de lançar uma compra.</td></tr>';
+    document.getElementById('compraTotalValor').textContent = fmt(0);
+    return;
+  }
+  body.innerHTML = compraLinhas.map((linha, idx) => {
+    const produto = produtos.find(p => p.id === linha.produtoId);
+    const subtotal = Number(linha.quantidade || 0) * Number(linha.custoUnitario || 0);
+    const opcoesProduto = produtos.map(p => `<option value="${p.id}" ${p.id === linha.produtoId ? 'selected' : ''}>${p.nome}${p.tamanho ? ' (' + p.tamanho + ')' : ''}</option>`).join('');
+    return `
+      <tr>
+        <td><select onchange="mudarProdutoLinhaCompra(${idx}, this.value)"><option value="">Selecione...</option>${opcoesProduto}</select></td>
+        <td>${produto ? produto.quantidade + ' ' + (produto.unidade || 'un') : '-'}</td>
+        <td><input type="number" step="0.01" min="0" value="${linha.quantidade}" onchange="mudarQuantidadeLinhaCompra(${idx}, this.value)" style="width:80px;"></td>
+        <td><input type="number" step="0.01" min="0" value="${linha.custoUnitario}" onchange="mudarCustoLinhaCompra(${idx}, this.value)" style="width:90px;"></td>
+        <td>${fmt(subtotal)}</td>
+        <td><button type="button" class="row-menu-danger" onclick="removerLinhaCompra(${idx})">Remover</button></td>
+      </tr>`;
+  }).join('');
+  const total = compraLinhas.reduce((s,l) => s + Number(l.quantidade || 0) * Number(l.custoUnitario || 0), 0);
+  document.getElementById('compraTotalValor').textContent = fmt(total);
+}
+
+// Dá entrada no estoque (oposto de aplicarBaixaEstoque) e atualiza o custo unitário do produto
+// para o valor pago agora — assim o CMV de vendas futuras usa o custo mais recente de compra.
+function aplicarEntradaEstoque(itens){
+  itens.forEach(it => {
+    const p = (data.produtos || []).find(p => p.id === it.produtoId);
+    if(p){
+      p.quantidade = Number((Number(p.quantidade) + Number(it.quantidade)).toFixed(3));
+      p.custoUnitario = Number(it.custoUnitario);
+    }
+  });
+}
+
+// Retira do estoque a quantidade de uma compra que está sendo editada ou excluída — usado antes
+// de reaplicar a entrada com os novos valores, ou ao excluir a compra de vez.
+function reverterEntradaEstoque(itens){
+  (itens || []).forEach(it => {
+    const p = (data.produtos || []).find(p => p.id === it.produtoId);
+    if(p) p.quantidade = Number((Number(p.quantidade) - Number(it.quantidade)).toFixed(3));
+  });
+}
+
+// Bloqueia editar/excluir uma compra se isso fizer o estoque ficar negativo — sinal de que
+// unidades daquela compra já foram vendidas e não podem ser "desfeitas".
+function validarReversaoCompra(itens){
+  for(const it of itens){
+    const p = (data.produtos || []).find(p => p.id === it.produtoId);
+    const disponivel = p ? Number(p.quantidade) : 0;
+    if(Number(it.quantidade) > disponivel){
+      return 'Não é possível alterar: já foram vendidas unidades de "' + (p ? p.nome : 'produto') + '" compradas neste lançamento.';
+    }
+  }
+  return null;
+}
+
+function salvarCompra(){
+  const erroEl = document.getElementById('compraErro');
+  erroEl.textContent = '';
+  erroEl.style.color = 'var(--red)';
+  const dataCompra = document.getElementById('compraData').value;
+  if(!dataCompra || !compraLinhas.length || compraLinhas.some(l => !l.produtoId || Number(l.quantidade) <= 0)){
+    erroEl.textContent = 'Preencha a data e ao menos um produto com quantidade válida.';
+    return;
+  }
+  const original = compraEditandoId ? data.lancamentos.find(l => l.id === compraEditandoId) : null;
+  if(original){
+    const erroReversao = validarReversaoCompra(original.itens);
+    if(erroReversao){
+      erroEl.textContent = erroReversao;
+      return;
+    }
+  }
+
+  const itens = compraLinhas.map(l => {
+    const p = (data.produtos || []).find(p => p.id === l.produtoId) || {};
+    return {
+      produtoId: l.produtoId,
+      produtoNome: p.nome || '(produto excluído)',
+      produtoTamanho: p.tamanho || '',
+      quantidade: Number(l.quantidade),
+      custoUnitario: Number(l.custoUnitario),
+      subtotal: Number((l.quantidade * l.custoUnitario).toFixed(2))
+    };
+  });
+  const entry = {
+    id: compraEditandoId || uid(),
+    data: dataCompra,
+    tipo: 'compra',
+    categoria: null,
+    valor: Number(itens.reduce((s,it) => s + it.subtotal, 0).toFixed(2)),
+    descricao: document.getElementById('compraDescricao').value.trim(),
+    nome: null, limite: null, vencimento: null, parcelas: null, tipoInvestimento: null, meta: null,
+    forma: document.getElementById('compraFormaConta').value,
+    itens
+  };
+
+  if(original){
+    reverterEntradaEstoque(original.itens);
+    aplicarEntradaEstoque(itens);
+    const idx = data.lancamentos.findIndex(l => l.id === compraEditandoId);
+    data.lancamentos[idx] = entry;
+  } else {
+    aplicarEntradaEstoque(itens);
+    data.lancamentos.push(entry);
+  }
+  saveData();
+  compraEditandoId = null;
+  compraLinhas = [];
+  renderAll();
+  irHome();
+}
+
 // ---------- Fechamento do mês (relatório-resumo, não trava lançamentos) ----------
 function abrirFechamentoMensal(){
   closeAccountMenu();
@@ -6084,6 +6311,11 @@ function renderCartoesPanel(){
 
 // Event listeners
 document.getElementById('lancTipo').addEventListener('change', function(){
+  // Compra e Venda usam um modal próprio (com itens de produto/quantidade), não o formulário
+  // genérico — escolher um desses tipos aqui só redireciona pra lá, sem deixar essa opção
+  // "selecionada de verdade" no formulário genérico.
+  if(this.value === 'venda'){ this.value = 'receita'; novaVenda(); return; }
+  if(this.value === 'compra'){ this.value = 'receita'; novaCompra(); return; }
   updateFormFieldsVisibility(this.value);
 });
 document.getElementById('lancCategoria').addEventListener('change', function(){
