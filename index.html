@@ -385,11 +385,13 @@
   .modal-close-btn svg{ width:20px; height:20px; }
   .modal-header-right{ display:flex; align-items:center; gap:8px; flex-shrink:0; }
   .mini-cal-input{ min-width:0; width:130px; height:32px; padding:4px 8px; font-size:0.78rem; }
-  /* Relatório do mês: força os 3 campos (Ver por / De / Até) a terem exatamente a mesma
-     largura sempre — alguns navegadores mobile dão um "tamanho nativo" um pouco diferente pra
-     <select> vs <input type=month/date>, então isso evita que um fique mais largo que o outro. */
+  /* Relatório do mês: usa o tamanho compacto padrão do .mini-cal-input (130px) em vez de esticar
+     pra 100% — em alguns navegadores mobile o input[type=month] mantinha a largura nativa mesmo
+     com width:100%, ultrapassando o quadro do modal. Precisa repetir "width" aqui (não só
+     confiar na classe .mini-cal-input) porque a regra ".field input{width:100%}" do mobile tem
+     mais especificidade que uma classe sozinha. -webkit-min-logical-width trava esse mínimo. */
   #relatorioModoPeriodo, #relatorioMesDe, #relatorioMesAte{
-    display:block; width:100%; max-width:100%; min-width:0; box-sizing:border-box;
+    width:130px; max-width:100%; -webkit-min-logical-width:130px;
   }
 
   /* Telas de página inteira abertas pela barra inferior (Lançamentos, Orçamento, Provisões, Extratos):
@@ -1336,6 +1338,17 @@
     <form class="inline" id="produtoForm">
       <div class="field"><label>Nome</label><input type="text" id="produtoNome" required></div>
       <div class="field"><label>Unidade</label><input type="text" id="produtoUnidade" placeholder="un, kg, L..." value="un"></div>
+      <div class="field"><label>Tamanho</label>
+        <select id="produtoTamanho">
+          <option value="">Sem tamanho</option>
+          <option value="S">S</option>
+          <option value="M">M</option>
+          <option value="L">L</option>
+          <option value="XL">XL</option>
+          <option value="2XL">2XL</option>
+          <option value="3XL">3XL</option>
+        </select>
+      </div>
       <div class="field"><label>Custo unitário (R$)</label><input type="number" step="0.01" min="0" id="produtoCusto" required></div>
       <div class="field"><label>Preço de venda (R$)</label><input type="number" step="0.01" min="0" id="produtoPreco" required></div>
       <div class="field"><label>Quantidade em estoque</label><input type="number" step="0.01" min="0" id="produtoQuantidade" required></div>
@@ -3784,9 +3797,11 @@ function agruparVendasPorProduto(vendas){
   const porProduto = {};
   vendas.forEach(v => {
     (v.itens || []).forEach(it => {
-      if(!porProduto[it.produtoNome]) porProduto[it.produtoNome] = { nome: it.produtoNome, quantidade: 0, valor: 0 };
-      porProduto[it.produtoNome].quantidade += Number(it.quantidade);
-      porProduto[it.produtoNome].valor += Number(it.subtotal);
+      const nomeExibido = it.produtoNome + (it.produtoTamanho ? ' (' + it.produtoTamanho + ')' : '');
+      const chave = it.produtoNome + '|' + (it.produtoTamanho || '');
+      if(!porProduto[chave]) porProduto[chave] = { nome: nomeExibido, quantidade: 0, valor: 0 };
+      porProduto[chave].quantidade += Number(it.quantidade);
+      porProduto[chave].valor += Number(it.subtotal);
     });
   });
   return Object.values(porProduto).sort((a,b) => b.valor - a.valor);
@@ -4992,7 +5007,7 @@ function detalheFor(item){
   }
   if(item.tipo === 'conta') return 'Ajuste de saldo base (' + (item.forma || 'Banco') + ')';
   if(item.tipo === 'venda'){
-    const partes = (item.itens || []).map(it => it.quantidade + 'x ' + it.produtoNome);
+    const partes = (item.itens || []).map(it => it.quantidade + 'x ' + it.produtoNome + (it.produtoTamanho ? ' (' + it.produtoTamanho + ')' : ''));
     return partes.join(', ') + ' • ' + (item.forma || 'Banco');
   }
   return '-';
@@ -5540,7 +5555,7 @@ function renderEstoque(){
     list.innerHTML = itens.map(p => `
       <div class="list-item">
         <div>
-          <div>${p.nome}</div>
+          <div>${p.nome}${p.tamanho ? ' (' + p.tamanho + ')' : ''}</div>
           <div class="meta">${p.quantidade} ${p.unidade || 'un'} em estoque • custo ${fmt(p.custoUnitario)} • venda ${fmt(p.precoVenda)}</div>
         </div>
         <div class="actions">
@@ -5576,11 +5591,15 @@ function toggleEstoqueList(){
 let editingProdutoId = null;
 
 function abrirFormProduto(id){
+  // Fecha o painel de Estoque (aberto como overlay no celular) antes de abrir este modal — senão
+  // os dois ficam empilhados com o mesmo z-index e o Estoque pode aparecer na frente.
+  if(typeof fecharPainelModal === 'function') fecharPainelModal();
   editingProdutoId = id;
   const produto = id ? (data.produtos || []).find(p => p.id === id) : null;
   document.getElementById('produtoFormTitulo').textContent = produto ? 'Editar produto' : 'Novo produto';
   document.getElementById('produtoNome').value = produto ? produto.nome : '';
   document.getElementById('produtoUnidade').value = produto ? (produto.unidade || 'un') : 'un';
+  document.getElementById('produtoTamanho').value = produto ? (produto.tamanho || '') : '';
   document.getElementById('produtoCusto').value = produto ? produto.custoUnitario : '';
   document.getElementById('produtoPreco').value = produto ? produto.precoVenda : '';
   document.getElementById('produtoQuantidade').value = produto ? produto.quantidade : '';
@@ -5598,6 +5617,7 @@ document.getElementById('produtoForm').addEventListener('submit', function(e){
   e.preventDefault();
   const nome = document.getElementById('produtoNome').value.trim();
   const unidade = document.getElementById('produtoUnidade').value.trim() || 'un';
+  const tamanho = document.getElementById('produtoTamanho').value;
   const custoUnitario = Number(document.getElementById('produtoCusto').value);
   const precoVenda = Number(document.getElementById('produtoPreco').value);
   const quantidade = Number(document.getElementById('produtoQuantidade').value);
@@ -5605,9 +5625,9 @@ document.getElementById('produtoForm').addEventListener('submit', function(e){
   if(!data.produtos) data.produtos = [];
   if(editingProdutoId){
     const produto = data.produtos.find(p => p.id === editingProdutoId);
-    if(produto) Object.assign(produto, { nome, unidade, custoUnitario, precoVenda, quantidade });
+    if(produto) Object.assign(produto, { nome, unidade, tamanho, custoUnitario, precoVenda, quantidade });
   } else {
-    data.produtos.push({ id: uid(), nome, unidade, custoUnitario, precoVenda, quantidade, criadoEm: new Date().toISOString() });
+    data.produtos.push({ id: uid(), nome, unidade, tamanho, custoUnitario, precoVenda, quantidade, criadoEm: new Date().toISOString() });
   }
   saveData();
   renderEstoque();
@@ -5640,6 +5660,9 @@ let vendaEditandoId = null;
 let vendaLinhas = [];
 
 function novaVenda(){
+  // Fecha o painel de Estoque (overlay no celular) antes de trocar de tela — mostrarView() já
+  // faz isso, mas repetir aqui garante que nunca fique o painel empilhado atrás da venda.
+  if(typeof fecharPainelModal === 'function') fecharPainelModal();
   vendaEditandoId = null;
   vendaLinhas = [];
   document.getElementById('vendaModalTitulo').textContent = 'Nova venda';
@@ -5706,7 +5729,7 @@ function renderVendaLinhas(){
     const produto = produtos.find(p => p.id === linha.produtoId);
     const disponivel = produto ? produto.quantidade : 0;
     const subtotal = Number(linha.quantidade || 0) * Number(linha.precoUnitario || 0);
-    const opcoesProduto = produtos.map(p => `<option value="${p.id}" ${p.id === linha.produtoId ? 'selected' : ''}>${p.nome} (${p.quantidade} ${p.unidade || 'un'})</option>`).join('');
+    const opcoesProduto = produtos.map(p => `<option value="${p.id}" ${p.id === linha.produtoId ? 'selected' : ''}>${p.nome}${p.tamanho ? ' (' + p.tamanho + ')' : ''} — ${p.quantidade} ${p.unidade || 'un'}</option>`).join('');
     return `
       <tr>
         <td><select onchange="mudarProdutoLinhaVenda(${idx}, this.value)"><option value="">Selecione...</option>${opcoesProduto}</select></td>
@@ -5779,6 +5802,7 @@ function salvarVenda(){
     return {
       produtoId: l.produtoId,
       produtoNome: p.nome || '(produto excluído)',
+      produtoTamanho: p.tamanho || '',
       quantidade: Number(l.quantidade),
       custoUnitario: Number(p.custoUnitario) || 0,
       precoUnitario: Number(l.precoUnitario),
