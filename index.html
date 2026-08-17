@@ -1203,10 +1203,12 @@
     <h2><span class="title"><span class="h2-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11v10"/></svg></span> Estoque</span>
       <span class="h2-actions">
         <button class="secondary small" onclick="abrirFormProduto(null)">+ Novo produto</button>
+        <button class="secondary small" onclick="abrirTimesModal()">+ Times</button>
       </span>
     </h2>
     <div class="panel-body">
     <div class="hint" style="margin-bottom:10px;">Compras e vendas de produtos são lançadas em Lançamentos (tipo Compra/Venda) e atualizam o estoque automaticamente.</div>
+    <div id="timesChipsWrap" style="display:none;"></div>
     <div class="totals-line" style="margin-bottom:0;">
       <span id="estoqueResumo">Nenhum produto cadastrado</span>
       <button type="button" class="secondary small" id="toggleEstoqueListBtn" onclick="toggleEstoqueList()">Ver produtos</button>
@@ -1355,11 +1357,42 @@
           <option value="3XL">3XL</option>
         </select>
       </div>
+      <div class="field">
+        <label>Time</label>
+        <div style="display:flex; gap:6px;">
+          <select id="produtoTimeId" style="flex:1;"><option value="">Sem time</option></select>
+          <button type="button" class="secondary iconbtn" onclick="abrirTimesModal()" title="Cadastrar time novo">+</button>
+        </div>
+      </div>
       <div class="field"><label>Custo unitário (R$)</label><input type="number" step="0.01" min="0" id="produtoCusto" required></div>
       <div class="field"><label>Preço de venda (R$)</label><input type="number" step="0.01" min="0" id="produtoPreco" required></div>
       <div class="field"><label>Quantidade em estoque</label><input type="number" step="0.01" min="0" id="produtoQuantidade" required></div>
       <button type="submit">Salvar</button>
     </form>
+  </div>
+</div>
+
+<div id="timesModal" class="modal-overlay" onclick="if(event.target===this) fecharTimesModal()">
+  <div class="modal-card" style="max-width:420px;">
+    <div class="modal-header">
+      <h3>Times</h3>
+      <button class="modal-close-btn" onclick="fecharTimesModal()" title="Fechar" aria-label="Fechar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <form class="inline" id="timeForm">
+      <div class="field"><label>Nome do time</label><input type="text" id="timeNome" required></div>
+      <div class="field">
+        <label>Emblema (opcional)</label>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <img id="timeEmblemaPreview" style="width:36px; height:36px; object-fit:contain; display:none;">
+          <button type="button" class="secondary small" onclick="document.getElementById('timeEmblemaInput').click()">Escolher imagem</button>
+          <input type="file" id="timeEmblemaInput" accept="image/*" style="display:none;" onchange="processarEmblemaTime(event)">
+        </div>
+      </div>
+      <button type="submit">Adicionar time</button>
+    </form>
+    <div id="timesList" style="margin-top:14px;"></div>
   </div>
 </div>
 
@@ -1377,6 +1410,10 @@
       </div>
       <div class="field" style="min-width:220px;"><label>Descrição (opcional)</label><input type="text" id="vendaDescricao"></div>
     </form>
+    <div class="field" id="fieldVendaFiltroTime" style="display:none; max-width:220px;">
+      <label>Filtrar produtos por time</label>
+      <select id="vendaFiltroTime" onchange="mudarFiltroTimeVenda(this.value)"><option value="">Todos os times</option></select>
+    </div>
     <div id="vendaItensWrap">
       <div class="tbl-wrap">
         <table>
@@ -1406,6 +1443,10 @@
       </div>
       <div class="field" style="min-width:220px;"><label>Fornecedor (opcional)</label><input type="text" id="compraDescricao"></div>
     </form>
+    <div class="field" id="fieldCompraFiltroTime" style="display:none; max-width:220px;">
+      <label>Filtrar produtos por time</label>
+      <select id="compraFiltroTime" onchange="mudarFiltroTimeCompra(this.value)"><option value="">Todos os times</option></select>
+    </div>
     <div id="compraItensWrap">
       <div class="tbl-wrap">
         <table>
@@ -2805,6 +2846,7 @@ auth.onAuthStateChanged(function(user){
         if(!data.provisoes) data.provisoes = [];
         if(!data.metasInvestimento) data.metasInvestimento = [];
         if(!data.produtos) data.produtos = [];
+        if(!data.times) data.times = [];
         lastKnownRev = data._rev || 0;
       } else if(snap.metadata.fromCache){
         // Sem persistência offline habilitada, o PRIMEIRO snapshot pode vir do cache local
@@ -2816,7 +2858,7 @@ auth.onAuthStateChanged(function(user){
         // não faz nada e espera o próximo snapshot.
         return;
       } else {
-        let initial = { lancamentos: [], categoriasReceita: [], categoriasDespesa: [], orcamentos: {}, provisoes: [], metasInvestimento: [], produtos: [], _rev: 0 };
+        let initial = { lancamentos: [], categoriasReceita: [], categoriasDespesa: [], orcamentos: {}, provisoes: [], metasInvestimento: [], produtos: [], times: [], _rev: 0 };
         const localRaw = localStorage.getItem(OLD_LOCAL_KEY);
         if(localRaw){
           try{ const parsed = JSON.parse(localRaw); if(parsed && parsed.lancamentos) initial = Object.assign(initial, parsed); }catch(e){}
@@ -2837,7 +2879,7 @@ auth.onAuthStateChanged(function(user){
       document.getElementById('loginError').textContent = 'Erro ao carregar dados: ' + err.message;
     });
   } else {
-    data = { lancamentos: [], categoriasReceita: [], categoriasDespesa: [], orcamentos: {}, provisoes: [], metasInvestimento: [], produtos: [] };
+    data = { lancamentos: [], categoriasReceita: [], categoriasDespesa: [], orcamentos: {}, provisoes: [], metasInvestimento: [], produtos: [], times: [] };
     if(!localStorage.getItem('broto_onboarding_visto')){
       showOnboarding();
     } else {
@@ -5531,9 +5573,9 @@ function abrirPainelModal(panelId){
   document.getElementById('painelModalBody').appendChild(panel);
   document.getElementById('painelModal').style.display = 'flex';
   bloquearScrollFundo();
-  // Conta Corrente e Dívidas não filtram por mês (são saldo/total acumulados), então o
+  // Conta Corrente, Dívidas e Estoque não filtram por mês (são saldo/total acumulados), então o
   // mini calendário só faz sentido para Despesa e Receita x Despesa.
-  const semCalendario = panelId === 'panelConta' || panelId === 'panelDividas';
+  const semCalendario = panelId === 'panelConta' || panelId === 'panelDividas' || panelId === 'panelEstoque';
   document.getElementById('filtroMesHome').style.display = semCalendario ? 'none' : '';
   // Mover o painel para dentro do modal não dispara o auto-resize do Chart.js (o gráfico foi
   // criado enquanto o painel estava com display:none), então recriamos os gráficos agora que o
@@ -5704,16 +5746,18 @@ function renderDividas(){
 
 // ---------- Estoque (produtos) ----------
 function renderEstoque(){
+  renderTimesChips();
   const list = document.getElementById('estoqueList');
-  const itens = (data.produtos || []).slice().sort((a,b) => a.nome.localeCompare(b.nome));
+  const todos = (data.produtos || []).slice().sort((a,b) => a.nome.localeCompare(b.nome));
+  const itens = filtroTimeEstoque ? todos.filter(p => p.timeId === filtroTimeEstoque) : todos;
   if(itens.length === 0){
-    list.innerHTML = '<div class="empty">Nenhum produto cadastrado.</div>';
+    list.innerHTML = '<div class="empty">' + (filtroTimeEstoque ? 'Nenhum produto cadastrado para esse time.' : 'Nenhum produto cadastrado.') + '</div>';
   } else {
     list.innerHTML = itens.map(p => `
       <div class="list-item">
         <div>
-          <div>${p.nome}${p.tamanho ? ' (' + p.tamanho + ')' : ''}</div>
-          <div class="meta">${p.quantidade} ${p.unidade || 'un'} em estoque • custo ${fmt(p.custoUnitario)} • venda ${fmt(p.precoVenda)}</div>
+          <div>${emblemaTimeHtml(p.timeId, 18)} ${p.nome}${p.tamanho ? ' (' + p.tamanho + ')' : ''}</div>
+          <div class="meta">${p.quantidade} ${p.unidade || 'un'} em estoque • custo ${fmt(p.custoUnitario)} • venda ${fmt(p.precoVenda)}${p.timeId ? ' • ' + nomeTime(p.timeId) : ''}</div>
         </div>
         <div class="actions">
           <span class="info blur-target" style="margin-right:6px;">${fmt(Number(p.quantidade) * Number(p.custoUnitario))}</span>
@@ -5729,10 +5773,11 @@ function renderEstoque(){
       </div>`).join('');
   }
   const total = itens.reduce((s,p) => s + Number(p.quantidade) * Number(p.custoUnitario), 0);
+  const sufixoTime = filtroTimeEstoque ? ' (' + nomeTime(filtroTimeEstoque) + ')' : '';
   document.getElementById('estoqueTotal').textContent = fmt(total);
   document.getElementById('estoqueResumo').textContent = itens.length === 0
-    ? 'Nenhum produto cadastrado'
-    : itens.length + (itens.length === 1 ? ' produto' : ' produtos') + ' • ' + fmt(total) + ' em estoque';
+    ? 'Nenhum produto cadastrado' + sufixoTime
+    : itens.length + (itens.length === 1 ? ' produto' : ' produtos') + sufixoTime + ' • ' + fmt(total) + ' em estoque';
 }
 
 // Mantém a lista de produtos fechada por padrão pra não poluir a Home com muita informação —
@@ -5757,6 +5802,8 @@ function abrirFormProduto(id){
   document.getElementById('produtoNome').value = produto ? produto.nome : '';
   document.getElementById('produtoUnidade').value = produto ? (produto.unidade || 'un') : 'un';
   document.getElementById('produtoTamanho').value = produto ? (produto.tamanho || '') : '';
+  populateProdutoTimeSelect();
+  document.getElementById('produtoTimeId').value = produto ? (produto.timeId || '') : '';
   document.getElementById('produtoCusto').value = produto ? produto.custoUnitario : '';
   document.getElementById('produtoPreco').value = produto ? produto.precoVenda : '';
   document.getElementById('produtoQuantidade').value = produto ? produto.quantidade : '';
@@ -5779,6 +5826,9 @@ function abrirNovoProdutoDeCompra(){
   criandoProdutoParaCompra = true;
   abrirFormProduto(null);
   document.getElementById('produtoQuantidade').value = 0;
+  // Se já tiver um time filtrado na compra, o produto novo já nasce nesse time — evita ter que
+  // escolher de novo logo em seguida.
+  if(compraFiltroTimeId) document.getElementById('produtoTimeId').value = compraFiltroTimeId;
 }
 
 document.getElementById('produtoForm').addEventListener('submit', function(e){
@@ -5786,6 +5836,7 @@ document.getElementById('produtoForm').addEventListener('submit', function(e){
   const nome = document.getElementById('produtoNome').value.trim();
   const unidade = document.getElementById('produtoUnidade').value.trim() || 'un';
   const tamanho = document.getElementById('produtoTamanho').value;
+  const timeId = document.getElementById('produtoTimeId').value;
   const custoUnitario = Number(document.getElementById('produtoCusto').value);
   const precoVenda = Number(document.getElementById('produtoPreco').value);
   const quantidade = Number(document.getElementById('produtoQuantidade').value);
@@ -5794,9 +5845,9 @@ document.getElementById('produtoForm').addEventListener('submit', function(e){
   let produtoCriado = null;
   if(editingProdutoId){
     const produto = data.produtos.find(p => p.id === editingProdutoId);
-    if(produto) Object.assign(produto, { nome, unidade, tamanho, custoUnitario, precoVenda, quantidade });
+    if(produto) Object.assign(produto, { nome, unidade, tamanho, timeId, custoUnitario, precoVenda, quantidade });
   } else {
-    produtoCriado = { id: uid(), nome, unidade, tamanho, custoUnitario, precoVenda, quantidade, criadoEm: new Date().toISOString() };
+    produtoCriado = { id: uid(), nome, unidade, tamanho, timeId, custoUnitario, precoVenda, quantidade, criadoEm: new Date().toISOString() };
     data.produtos.push(produtoCriado);
   }
   saveData();
@@ -5830,9 +5881,162 @@ function reporEstoque(id){
   renderEstoque();
 }
 
+// ---------- Times (categorias de produto, ex: times de futebol numa loja de mantos) ----------
+// Cada time pode ter um emblema (imagem enviada pela própria pessoa, redimensionada e guardada
+// como data URL dentro do documento — não depende de configurar Firebase Storage à parte).
+let filtroTimeEstoque = '';
+let timeEmblemaPendente = '';
+
+function emblemaTimeHtml(timeId, tamanho){
+  const time = (data.times || []).find(t => t.id === timeId);
+  if(!time || !time.emblema) return '';
+  return `<img src="${time.emblema}" alt="${time.nome}" style="width:${tamanho||20}px; height:${tamanho||20}px; object-fit:contain; border-radius:4px; vertical-align:middle;">`;
+}
+function nomeTime(timeId){
+  const time = (data.times || []).find(t => t.id === timeId);
+  return time ? time.nome : '';
+}
+
+function abrirTimesModal(){
+  document.getElementById('timeForm').reset();
+  document.getElementById('timeEmblemaPreview').style.display = 'none';
+  timeEmblemaPendente = '';
+  renderTimesList();
+  document.getElementById('timesModal').style.display = 'flex';
+  bloquearScrollFundo();
+}
+function fecharTimesModal(){
+  document.getElementById('timesModal').style.display = 'none';
+  liberarScrollFundo();
+  // Recarrega os seletores de time que possam estar visíveis por trás (produto, venda, compra)
+  // pra já refletir times criados/excluídos nesta sessão do modal.
+  populateProdutoTimeSelect();
+  populateVendaFiltroTime();
+  populateCompraFiltroTime();
+  renderTimesChips();
+  renderEstoque();
+}
+
+function processarEmblemaTime(e){
+  const arquivo = e.target.files[0];
+  e.target.value = '';
+  if(!arquivo) return;
+  const leitor = new FileReader();
+  leitor.onload = function(ev){
+    const img = new Image();
+    img.onload = function(){
+      // "Contain" (cabe inteiro, sem cortar) — diferente do crop da foto de perfil, um escudo
+      // cortado nas bordas fica irreconhecível.
+      const tam = 96;
+      const canvas = document.createElement('canvas');
+      canvas.width = tam;
+      canvas.height = tam;
+      const ctx = canvas.getContext('2d');
+      const escala = Math.min(tam / img.width, tam / img.height);
+      const w = img.width * escala, h = img.height * escala;
+      ctx.drawImage(img, (tam - w) / 2, (tam - h) / 2, w, h);
+      timeEmblemaPendente = canvas.toDataURL('image/png');
+      const preview = document.getElementById('timeEmblemaPreview');
+      preview.src = timeEmblemaPendente;
+      preview.style.display = 'inline-block';
+    };
+    img.src = ev.target.result;
+  };
+  leitor.readAsDataURL(arquivo);
+}
+
+document.getElementById('timeForm').addEventListener('submit', function(e){
+  e.preventDefault();
+  const nome = document.getElementById('timeNome').value.trim();
+  if(!nome) return;
+  if(!data.times) data.times = [];
+  data.times.push({ id: uid(), nome, emblema: timeEmblemaPendente || '' });
+  saveData();
+  document.getElementById('timeForm').reset();
+  document.getElementById('timeEmblemaPreview').style.display = 'none';
+  timeEmblemaPendente = '';
+  renderTimesList();
+  populateProdutoTimeSelect();
+});
+
+function excluirTime(id){
+  const time = (data.times || []).find(t => t.id === id);
+  if(!time) return;
+  if(!confirm('Excluir o time "' + time.nome + '"? Produtos já cadastrados nele ficam sem time, mas continuam existindo.')) return;
+  data.times = data.times.filter(t => t.id !== id);
+  if(filtroTimeEstoque === id) filtroTimeEstoque = '';
+  saveData();
+  renderTimesList();
+}
+
+function renderTimesList(){
+  const wrap = document.getElementById('timesList');
+  const times = data.times || [];
+  if(times.length === 0){
+    wrap.innerHTML = '<div class="empty">Nenhum time cadastrado ainda.</div>';
+    return;
+  }
+  wrap.innerHTML = times.map(t => `
+    <div class="list-item">
+      <div style="display:flex; align-items:center; gap:8px;">${emblemaTimeHtml(t.id, 28)}<span>${t.nome}</span></div>
+      <button class="row-menu-danger" onclick="excluirTime('${t.id}')">Excluir</button>
+    </div>
+  `).join('');
+}
+
+function populateProdutoTimeSelect(){
+  const sel = document.getElementById('produtoTimeId');
+  if(!sel) return;
+  const valorAtual = sel.value;
+  sel.innerHTML = '<option value="">Sem time</option>' + (data.times || []).map(t => `<option value="${t.id}">${t.nome}</option>`).join('');
+  if((data.times || []).some(t => t.id === valorAtual)) sel.value = valorAtual;
+}
+
+// Filtro por time usado no painel Estoque — mostra só as peças daquele time (ou todas, se vazio).
+function renderTimesChips(){
+  const wrap = document.getElementById('timesChipsWrap');
+  const times = data.times || [];
+  if(times.length === 0){
+    wrap.style.display = 'none';
+    return;
+  }
+  wrap.style.display = 'flex';
+  wrap.style.flexWrap = 'wrap';
+  wrap.style.gap = '8px';
+  wrap.style.marginBottom = '10px';
+  const chipBase = 'display:inline-flex; align-items:center; gap:6px; padding:5px 10px; border-radius:20px; border:1px solid var(--border); cursor:pointer; font-size:0.78rem;';
+  const todosAtivo = !filtroTimeEstoque;
+  let html = `<span onclick="filtrarPorTime('')" style="${chipBase} ${todosAtivo ? 'background:var(--blue); color:#fff; border-color:var(--blue);' : 'background:var(--card2);'}">Todos</span>`;
+  html += times.map(t => {
+    const ativo = filtroTimeEstoque === t.id;
+    return `<span onclick="filtrarPorTime('${t.id}')" style="${chipBase} ${ativo ? 'background:var(--blue); color:#fff; border-color:var(--blue);' : 'background:var(--card2);'}">${emblemaTimeHtml(t.id, 18)}${t.nome}</span>`;
+  }).join('');
+  wrap.innerHTML = html;
+}
+
+function filtrarPorTime(timeId){
+  filtroTimeEstoque = timeId;
+  renderEstoque();
+}
+
 // ---------- Venda (com baixa automática de estoque) ----------
 let vendaEditandoId = null;
 let vendaLinhas = [];
+
+let vendaFiltroTimeId = '';
+
+function populateVendaFiltroTime(){
+  const sel = document.getElementById('vendaFiltroTime');
+  const field = document.getElementById('fieldVendaFiltroTime');
+  const times = data.times || [];
+  field.style.display = times.length ? 'flex' : 'none';
+  sel.innerHTML = '<option value="">Todos os times</option>' + times.map(t => `<option value="${t.id}">${t.nome}</option>`).join('');
+  sel.value = vendaFiltroTimeId;
+}
+function mudarFiltroTimeVenda(timeId){
+  vendaFiltroTimeId = timeId;
+  renderVendaLinhas();
+}
 
 function novaVenda(){
   // Fecha o painel de Estoque (overlay no celular) antes de trocar de tela — mostrarView() já
@@ -5840,11 +6044,13 @@ function novaVenda(){
   if(typeof fecharPainelModal === 'function') fecharPainelModal();
   vendaEditandoId = null;
   vendaLinhas = [];
+  vendaFiltroTimeId = '';
   document.getElementById('vendaModalTitulo').textContent = 'Nova venda';
   document.getElementById('vendaData').value = new Date().toISOString().slice(0,10);
   document.getElementById('vendaDescricao').value = '';
   document.getElementById('vendaErro').textContent = '';
   populateVendaFormaConta();
+  populateVendaFiltroTime();
   adicionarLinhaVenda();
   mostrarView('vendaModal');
 }
@@ -5854,11 +6060,13 @@ function editarVenda(id){
   if(!item) return;
   vendaEditandoId = id;
   vendaLinhas = item.itens.map(it => ({ produtoId: it.produtoId, quantidade: it.quantidade, precoUnitario: it.precoUnitario }));
+  vendaFiltroTimeId = '';
   document.getElementById('vendaModalTitulo').textContent = 'Editar venda';
   document.getElementById('vendaData').value = item.data;
   document.getElementById('vendaDescricao').value = item.descricao || '';
   document.getElementById('vendaErro').textContent = '';
   populateVendaFormaConta();
+  populateVendaFiltroTime();
   document.getElementById('vendaFormaConta').value = item.forma || 'Banco';
   renderVendaLinhas();
   mostrarView('vendaModal');
@@ -5882,11 +6090,13 @@ function removerLinhaVenda(idx){
 
 // Nomes de produto distintos e as variantes (tamanhos) de um nome — usados para separar "qual
 // produto" de "qual tamanho" em dois seletores, em vez de misturar tudo numa opção só.
-function nomesProdutosUnicos(){
-  return Array.from(new Set((data.produtos || []).map(p => p.nome))).sort();
+function nomesProdutosUnicos(timeId){
+  const base = timeId ? (data.produtos || []).filter(p => p.timeId === timeId) : (data.produtos || []);
+  return Array.from(new Set(base.map(p => p.nome))).sort();
 }
-function produtosComNome(nome){
-  return (data.produtos || []).filter(p => p.nome === nome);
+function produtosComNome(nome, timeId){
+  const base = timeId ? (data.produtos || []).filter(p => p.timeId === timeId) : (data.produtos || []);
+  return base.filter(p => p.nome === nome);
 }
 
 function mudarProdutoLinhaVenda(idx, produtoId){
@@ -5916,11 +6126,11 @@ function mudarPrecoLinhaVenda(idx, valor){
 function renderVendaLinhas(){
   const body = document.getElementById('vendaItensBody');
   const produtos = data.produtos || [];
-  const nomesUnicos = nomesProdutosUnicos();
+  const nomesUnicos = nomesProdutosUnicos(vendaFiltroTimeId);
   body.innerHTML = vendaLinhas.map((linha, idx) => {
     const produto = produtos.find(p => p.id === linha.produtoId);
     const nomeAtual = produto ? produto.nome : '';
-    const variantes = nomeAtual ? produtosComNome(nomeAtual) : [];
+    const variantes = nomeAtual ? produtosComNome(nomeAtual, vendaFiltroTimeId) : [];
     const disponivel = produto ? produto.quantidade : 0;
     const subtotal = Number(linha.quantidade || 0) * Number(linha.precoUnitario || 0);
     const opcoesNome = nomesUnicos.map(n => `<option value="${n}" ${n === nomeAtual ? 'selected' : ''}>${n}</option>`).join('');
@@ -6037,15 +6247,31 @@ function salvarVenda(){
 // ---------- Compra (dá entrada no estoque e atualiza o custo do produto) ----------
 let compraEditandoId = null;
 let compraLinhas = [];
+let compraFiltroTimeId = '';
+
+function populateCompraFiltroTime(){
+  const sel = document.getElementById('compraFiltroTime');
+  const field = document.getElementById('fieldCompraFiltroTime');
+  const times = data.times || [];
+  field.style.display = times.length ? 'flex' : 'none';
+  sel.innerHTML = '<option value="">Todos os times</option>' + times.map(t => `<option value="${t.id}">${t.nome}</option>`).join('');
+  sel.value = compraFiltroTimeId;
+}
+function mudarFiltroTimeCompra(timeId){
+  compraFiltroTimeId = timeId;
+  renderCompraLinhas();
+}
 
 function novaCompra(){
   compraEditandoId = null;
   compraLinhas = [];
+  compraFiltroTimeId = '';
   document.getElementById('compraModalTitulo').textContent = 'Nova compra';
   document.getElementById('compraData').value = new Date().toISOString().slice(0,10);
   document.getElementById('compraDescricao').value = '';
   document.getElementById('compraErro').textContent = '';
   populateCompraFormaConta();
+  populateCompraFiltroTime();
   if((data.produtos || []).length){
     adicionarLinhaCompra();
   } else {
@@ -6059,11 +6285,13 @@ function editarCompra(id){
   if(!item) return;
   compraEditandoId = id;
   compraLinhas = item.itens.map(it => ({ produtoId: it.produtoId, quantidade: it.quantidade, custoUnitario: it.custoUnitario }));
+  compraFiltroTimeId = '';
   document.getElementById('compraModalTitulo').textContent = 'Editar compra';
   document.getElementById('compraData').value = item.data;
   document.getElementById('compraDescricao').value = item.descricao || '';
   document.getElementById('compraErro').textContent = '';
   populateCompraFormaConta();
+  populateCompraFiltroTime();
   document.getElementById('compraFormaConta').value = item.forma || 'Banco';
   renderCompraLinhas();
   mostrarView('compraModal');
@@ -6118,11 +6346,11 @@ function renderCompraLinhas(){
     document.getElementById('compraTotalValor').textContent = fmt(0);
     return;
   }
-  const nomesUnicos = nomesProdutosUnicos();
+  const nomesUnicos = nomesProdutosUnicos(compraFiltroTimeId);
   body.innerHTML = compraLinhas.map((linha, idx) => {
     const produto = produtos.find(p => p.id === linha.produtoId);
     const nomeAtual = produto ? produto.nome : '';
-    const variantes = nomeAtual ? produtosComNome(nomeAtual) : [];
+    const variantes = nomeAtual ? produtosComNome(nomeAtual, compraFiltroTimeId) : [];
     const subtotal = Number(linha.quantidade || 0) * Number(linha.custoUnitario || 0);
     const opcoesNome = nomesUnicos.map(n => `<option value="${n}" ${n === nomeAtual ? 'selected' : ''}>${n}</option>`).join('');
     const opcoesTamanho = variantes.map(p => `<option value="${p.id}" ${p.id === linha.produtoId ? 'selected' : ''}>${p.tamanho || '—'}</option>`).join('');
