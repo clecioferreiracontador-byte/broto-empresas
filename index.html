@@ -1209,6 +1209,20 @@
     <div class="panel-body">
     <div class="hint" style="margin-bottom:10px;">Compras e vendas de produtos são lançadas em Lançamentos (tipo Compra/Venda) e atualizam o estoque automaticamente.</div>
     <div id="timesChipsWrap" style="display:none;"></div>
+    <div id="estoqueFiltrosExtras" style="display:none; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
+      <div class="field" style="min-width:130px;">
+        <label>Tamanho</label>
+        <select id="estoqueFiltroTamanho" onchange="mudarFiltroTamanhoEstoque(this.value)"><option value="">Todos os tamanhos</option></select>
+      </div>
+      <div class="field" style="min-width:150px;">
+        <label>Disponibilidade</label>
+        <select id="estoqueFiltroQtd" onchange="mudarFiltroQtdEstoque(this.value)">
+          <option value="">Todos</option>
+          <option value="disponivel">Com estoque</option>
+          <option value="zerado">Sem estoque</option>
+        </select>
+      </div>
+    </div>
     <div class="totals-line" style="margin-bottom:0;">
       <span id="estoqueResumo">Nenhum produto cadastrado</span>
       <button type="button" class="secondary small" id="toggleEstoqueListBtn" onclick="toggleEstoqueList()">Ver produtos</button>
@@ -5745,13 +5759,49 @@ function renderDividas(){
 }
 
 // ---------- Estoque (produtos) ----------
+let filtroTamanhoEstoque = '';
+let filtroQtdEstoque = '';
+
+function mudarFiltroTamanhoEstoque(tamanho){
+  filtroTamanhoEstoque = tamanho;
+  renderEstoque();
+}
+function mudarFiltroQtdEstoque(valor){
+  filtroQtdEstoque = valor;
+  renderEstoque();
+}
+
+// Só lista, no filtro de Tamanho, os tamanhos que realmente existem em algum produto — evita um
+// select cheio de opções (ex: 2XL, 3XL) que ninguém cadastrou ainda.
+function populateFiltroTamanhoEstoque(){
+  const sel = document.getElementById('estoqueFiltroTamanho');
+  const valorAtual = sel.value;
+  const tamanhos = Array.from(new Set((data.produtos || []).map(p => p.tamanho || '').filter(Boolean))).sort();
+  let opcoes = '<option value="">Todos os tamanhos</option>';
+  opcoes += tamanhos.map(t => `<option value="${t}">${t}</option>`).join('');
+  if((data.produtos || []).some(p => !p.tamanho)) opcoes += '<option value="__sem__">Sem tamanho</option>';
+  sel.innerHTML = opcoes;
+  sel.value = valorAtual;
+}
+
 function renderEstoque(){
   renderTimesChips();
+  populateFiltroTamanhoEstoque();
+  const extrasWrap = document.getElementById('estoqueFiltrosExtras');
+  extrasWrap.style.display = (data.produtos || []).length ? 'flex' : 'none';
   const list = document.getElementById('estoqueList');
   const todos = (data.produtos || []).slice().sort((a,b) => a.nome.localeCompare(b.nome));
-  const itens = filtroTimeEstoque ? todos.filter(p => p.timeId === filtroTimeEstoque) : todos;
+  let itens = filtroTimeEstoque ? todos.filter(p => p.timeId === filtroTimeEstoque) : todos;
+  if(filtroTamanhoEstoque === '__sem__'){
+    itens = itens.filter(p => !p.tamanho);
+  } else if(filtroTamanhoEstoque){
+    itens = itens.filter(p => p.tamanho === filtroTamanhoEstoque);
+  }
+  if(filtroQtdEstoque === 'disponivel') itens = itens.filter(p => Number(p.quantidade) > 0);
+  else if(filtroQtdEstoque === 'zerado') itens = itens.filter(p => Number(p.quantidade) <= 0);
+  const filtroAtivo = filtroTimeEstoque || filtroTamanhoEstoque || filtroQtdEstoque;
   if(itens.length === 0){
-    list.innerHTML = '<div class="empty">' + (filtroTimeEstoque ? 'Nenhum produto cadastrado para esse time.' : 'Nenhum produto cadastrado.') + '</div>';
+    list.innerHTML = '<div class="empty">' + (filtroAtivo ? 'Nenhum produto encontrado para esse filtro.' : 'Nenhum produto cadastrado.') + '</div>';
   } else {
     list.innerHTML = itens.map(p => `
       <div class="list-item">
@@ -5776,7 +5826,7 @@ function renderEstoque(){
   const sufixoTime = filtroTimeEstoque ? ' (' + nomeTime(filtroTimeEstoque) + ')' : '';
   document.getElementById('estoqueTotal').textContent = fmt(total);
   document.getElementById('estoqueResumo').textContent = itens.length === 0
-    ? 'Nenhum produto cadastrado' + sufixoTime
+    ? 'Nenhum produto encontrado' + sufixoTime
     : itens.length + (itens.length === 1 ? ' produto' : ' produtos') + sufixoTime + ' • ' + fmt(total) + ' em estoque';
 }
 
