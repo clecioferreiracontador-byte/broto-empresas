@@ -5823,11 +5823,12 @@ function renderEstoque(){
       </div>`).join('');
   }
   const total = itens.reduce((s,p) => s + Number(p.quantidade) * Number(p.custoUnitario), 0);
+  const totalUnidades = itens.reduce((s,p) => s + Number(p.quantidade), 0);
   const sufixoTime = filtroTimeEstoque ? ' (' + nomeTime(filtroTimeEstoque) + ')' : '';
   document.getElementById('estoqueTotal').textContent = fmt(total);
   document.getElementById('estoqueResumo').textContent = itens.length === 0
     ? 'Nenhum produto encontrado' + sufixoTime
-    : itens.length + (itens.length === 1 ? ' produto' : ' produtos') + sufixoTime + ' • ' + fmt(total) + ' em estoque';
+    : totalUnidades.toLocaleString('pt-BR') + (totalUnidades === 1 ? ' unidade' : ' unidades') + sufixoTime + ' • ' + fmt(total) + ' em estoque';
 }
 
 // Mantém a lista de produtos fechada por padrão pra não poluir a Home com muita informação —
