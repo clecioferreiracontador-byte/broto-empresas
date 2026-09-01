@@ -6181,9 +6181,13 @@ function mudarProdutoLinhaVenda(idx, produtoId){
 }
 
 // Trocar o nome do produto reseta pro primeiro tamanho disponível daquele nome — o segundo
-// seletor (tamanho) então lista só as variantes desse nome específico.
+// seletor (tamanho) então lista só as variantes desse nome específico. Precisa respeitar o
+// filtro de time aqui também: sem isso, com dois times tendo um produto de mesmo nome (ex.:
+// "Blusa retro" no Fluminense e no Flamengo), a primeira variante encontrada podia ser a de
+// outro time — o seletor de tamanho mostrava certo (já filtrado), mas o produto de fato
+// selecionado por baixo ficava errado, e a baixa de estoque saía no produto errado.
 function mudarNomeLinhaVenda(idx, nome){
-  const variantes = produtosComNome(nome);
+  const variantes = produtosComNome(nome, vendaFiltroTimeId);
   mudarProdutoLinhaVenda(idx, variantes[0] ? variantes[0].id : '');
 }
 
@@ -6426,9 +6430,11 @@ function mudarProdutoLinhaCompra(idx, produtoId){
 }
 
 // Trocar o nome do produto reseta pro primeiro tamanho disponível daquele nome — o segundo
-// seletor (tamanho) então lista só as variantes desse nome específico.
+// seletor (tamanho) então lista só as variantes desse nome específico. Mesmo cuidado da Venda
+// (ver mudarNomeLinhaVenda): precisa respeitar o filtro de time aqui, senão a variante escolhida
+// pode ser de outro time com produto de mesmo nome.
 function mudarNomeLinhaCompra(idx, nome){
-  const variantes = produtosComNome(nome);
+  const variantes = produtosComNome(nome, compraFiltroTimeId);
   mudarProdutoLinhaCompra(idx, variantes[0] ? variantes[0].id : '');
 }
 
