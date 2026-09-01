@@ -1380,7 +1380,11 @@
       </div>
       <div class="field"><label>Custo unitário (R$)</label><input type="number" step="0.01" min="0" id="produtoCusto" required></div>
       <div class="field"><label>Preço de venda (R$)</label><input type="number" step="0.01" min="0" id="produtoPreco" required></div>
-      <div class="field"><label>Quantidade em estoque</label><input type="number" step="0.01" min="0" id="produtoQuantidade" required></div>
+      <div class="field">
+        <label>Quantidade em estoque</label>
+        <input type="number" step="0.01" min="0" id="produtoQuantidade" required>
+        <div class="hint" id="produtoQuantidadeHint" style="display:none;">A quantidade comprada é lançada na própria compra — aqui fica 0 pra não contar em dobro.</div>
+      </div>
       <button type="submit">Salvar</button>
     </form>
   </div>
@@ -1456,6 +1460,13 @@
         <select id="compraFormaConta"></select>
       </div>
       <div class="field" style="min-width:220px;"><label>Fornecedor (opcional)</label><input type="text" id="compraDescricao"></div>
+      <div class="field">
+        <label>Categoria</label>
+        <div style="display:flex; gap:6px;">
+          <select id="compraCategoria" style="flex:1;" required></select>
+          <button type="button" class="secondary iconbtn" onclick="adicionarCategoriaCompra()" title="Nova categoria">+</button>
+        </div>
+      </div>
     </form>
     <div class="field" id="fieldCompraFiltroTime" style="display:none; max-width:220px;">
       <label>Filtrar produtos por time</label>
@@ -3950,6 +3961,7 @@ function coletarDadosRelatorio(dataInicio, dataFim){
     resultado.compras = compras;
     resultado.totalCompras = compras.reduce((s,l) => s + Number(l.valor), 0);
     resultado.comprasPorProduto = agruparVendasPorProduto(compras);
+    resultado.comprasPorCategoria = agruparPorCampo(compras, 'categoria', 'Outros');
   }
   return resultado;
 }
@@ -4067,6 +4079,7 @@ async function gerarRelatorioPDF(){
 
     const secoes = [
       ['Despesas por categoria', r.despesasPorCategoria],
+      ['Compras de estoque por categoria', r.comprasPorCategoria || []],
       ['Receitas por categoria', r.receitasPorCategoria],
       ['Compras no cartão por cartão', r.cartaoPorNome],
       ['Pé de meia por meta', r.investimentosPorMeta]
@@ -4176,6 +4189,7 @@ async function gerarRelatorioExcel(){
     }
     const grupos = [
       [r.despesasPorCategoria, 'Categoria', 'Despesas por categoria'],
+      [r.comprasPorCategoria || [], 'Categoria', 'Compras por categoria'],
       [r.receitasPorCategoria, 'Categoria', 'Receitas por categoria'],
       [r.cartaoPorNome, 'Cartão', 'Cartão'],
       [r.investimentosPorMeta, 'Meta', 'Pé de meia por meta']
@@ -5858,6 +5872,8 @@ function abrirFormProduto(id){
   document.getElementById('produtoCusto').value = produto ? produto.custoUnitario : '';
   document.getElementById('produtoPreco').value = produto ? produto.precoVenda : '';
   document.getElementById('produtoQuantidade').value = produto ? produto.quantidade : '';
+  document.getElementById('produtoQuantidade').disabled = false;
+  document.getElementById('produtoQuantidadeHint').style.display = 'none';
   document.getElementById('produtoFormModal').style.display = 'flex';
   bloquearScrollFundo();
 }
@@ -5876,7 +5892,12 @@ let criandoProdutoParaCompra = false;
 function abrirNovoProdutoDeCompra(){
   criandoProdutoParaCompra = true;
   abrirFormProduto(null);
+  // Quantidade fica travada em 0 e é preenchida só pela linha da compra (abaixo) — deixar
+  // editável aqui faria a entrada de estoque ser contada duas vezes: uma no cadastro do
+  // produto, outra quando a compra é salva (aplicarEntradaEstoque soma a quantidade da linha).
   document.getElementById('produtoQuantidade').value = 0;
+  document.getElementById('produtoQuantidade').disabled = true;
+  document.getElementById('produtoQuantidadeHint').style.display = 'block';
   // Se já tiver um time filtrado na compra, o produto novo já nasce nesse time — evita ter que
   // escolher de novo logo em seguida.
   if(compraFiltroTimeId) document.getElementById('produtoTimeId').value = compraFiltroTimeId;
@@ -5890,7 +5911,9 @@ document.getElementById('produtoForm').addEventListener('submit', function(e){
   const timeId = document.getElementById('produtoTimeId').value;
   const custoUnitario = Number(document.getElementById('produtoCusto').value);
   const precoVenda = Number(document.getElementById('produtoPreco').value);
-  const quantidade = Number(document.getElementById('produtoQuantidade').value);
+  // Vindo da tela de Compra, a quantidade é sempre 0 aqui (o campo fica travado) — quem dá
+  // entrada no estoque é a própria compra, pra não somar a mesma quantidade duas vezes.
+  const quantidade = criandoProdutoParaCompra ? 0 : Number(document.getElementById('produtoQuantidade').value);
   if(!nome || quantidade < 0 || custoUnitario < 0 || precoVenda < 0) return;
   if(!data.produtos) data.produtos = [];
   let produtoCriado = null;
@@ -6322,6 +6345,8 @@ function novaCompra(){
   document.getElementById('compraDescricao').value = '';
   document.getElementById('compraErro').textContent = '';
   populateCompraFormaConta();
+  populateCompraCategoria();
+  document.getElementById('compraCategoria').value = '';
   populateCompraFiltroTime();
   if((data.produtos || []).length){
     adicionarLinhaCompra();
@@ -6342,6 +6367,8 @@ function editarCompra(id){
   document.getElementById('compraDescricao').value = item.descricao || '';
   document.getElementById('compraErro').textContent = '';
   populateCompraFormaConta();
+  populateCompraCategoria();
+  document.getElementById('compraCategoria').value = item.categoria || '';
   populateCompraFiltroTime();
   document.getElementById('compraFormaConta').value = item.forma || 'Banco';
   renderCompraLinhas();
@@ -6352,6 +6379,32 @@ function populateCompraFormaConta(){
   const sel = document.getElementById('compraFormaConta');
   const lista = listaFormasConta();
   sel.innerHTML = lista.map(f => `<option value="${f}">${f}</option>`).join('');
+}
+
+// Categoria da compra usa a mesma lista de categorias de despesa (padrão + personalizadas) —
+// mesmo sendo estoque, a compra é uma saída de caixa e precisa de categoria pra fechar o
+// controle de fornecedores/gastos por categoria nos relatórios.
+function populateCompraCategoria(){
+  const sel = document.getElementById('compraCategoria');
+  const lista = listaCategoriasParaTipo('despesa');
+  const valorAtual = sel.value;
+  sel.innerHTML = '<option value="">Selecione...</option>' + lista.map(c => `<option value="${c}">${c}</option>`).join('');
+  if(lista.includes(valorAtual)) sel.value = valorAtual;
+}
+
+function adicionarCategoriaCompra(){
+  const nome = prompt('Nome da nova categoria de despesa:');
+  if(!nome || !nome.trim()) return;
+  const nomeTrim = nome.trim();
+  if(!data.categoriasDespesa) data.categoriasDespesa = [];
+  if(CATEGORIAS_DESPESA.includes(nomeTrim) || data.categoriasDespesa.includes(nomeTrim)){
+    alert('Essa categoria já existe.');
+    return;
+  }
+  data.categoriasDespesa.push(nomeTrim);
+  saveData();
+  populateCompraCategoria();
+  document.getElementById('compraCategoria').value = nomeTrim;
 }
 
 function adicionarLinhaCompra(){
@@ -6459,8 +6512,13 @@ function salvarCompra(){
   erroEl.textContent = '';
   erroEl.style.color = 'var(--red)';
   const dataCompra = document.getElementById('compraData').value;
+  const categoriaCompra = document.getElementById('compraCategoria').value;
   if(!dataCompra || !compraLinhas.length || compraLinhas.some(l => !l.produtoId || Number(l.quantidade) <= 0)){
     erroEl.textContent = 'Preencha a data e ao menos um produto com quantidade válida.';
+    return;
+  }
+  if(!categoriaCompra){
+    erroEl.textContent = 'Selecione a categoria da compra.';
     return;
   }
   const original = compraEditandoId ? data.lancamentos.find(l => l.id === compraEditandoId) : null;
@@ -6487,7 +6545,7 @@ function salvarCompra(){
     id: compraEditandoId || uid(),
     data: dataCompra,
     tipo: 'compra',
-    categoria: null,
+    categoria: categoriaCompra,
     valor: Number(itens.reduce((s,it) => s + it.subtotal, 0).toFixed(2)),
     descricao: document.getElementById('compraDescricao').value.trim(),
     nome: null, limite: null, vencimento: null, parcelas: null, tipoInvestimento: null, meta: null,
