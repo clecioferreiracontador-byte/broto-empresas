@@ -5086,8 +5086,23 @@ function renderFluxoCaixa(){
   // Gráfico: saldo projetado ao final de cada mês (conta corrente + provisões futuras)
   const porMes = {};
   calc.linhas.forEach(l => { porMes[l.mes] = l.saldoAcumulado; });
-  const mesesOrdenados = calc.meses;
-  const valores = mesesOrdenados.map(m => porMes[m] !== undefined ? porMes[m] : calc.saldoAtual);
+  // Sem provisões o gráfico ficava com um único ponto (só o mês atual) e parecia vazio. Por isso
+  // inclui também os últimos meses já realizados: o saldo ao fim de cada um é o saldo atual menos
+  // tudo que entrou/saiu (receitas + vendas − despesas − compras, Banco e Espécie juntos) depois dele.
+  const hojeMes = new Date().toISOString().slice(0,7);
+  const movimentosConta = data.lancamentos.filter(l => l.tipo==='receita'||l.tipo==='venda'||l.tipo==='despesa'||l.tipo==='compra');
+  const mesesPassados = [];
+  for(let i = 5; i >= 1; i--){
+    const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - i);
+    mesesPassados.push(d.toISOString().slice(0,7));
+  }
+  const primeiroMov = movimentosConta.reduce((min,l) => (!min || l.data < min ? l.data : min), null);
+  const mesesHist = mesesPassados.filter(m => primeiroMov && m >= primeiroMov.slice(0,7));
+  const saldoFimDoMes = m => calc.saldoAtual - movimentosConta
+    .filter(l => l.data.slice(0,7) > m)
+    .reduce((s,l) => s + ((l.tipo==='receita'||l.tipo==='venda') ? Number(l.valor) : -Number(l.valor)), 0);
+  const mesesOrdenados = mesesHist.concat(calc.meses.filter(m => !mesesHist.includes(m)));
+  const valores = mesesOrdenados.map(m => mesesHist.includes(m) ? saldoFimDoMes(m) : (porMes[m] !== undefined ? porMes[m] : calc.saldoAtual));
 
   const canvas = document.getElementById('chartFluxoProjetadoInline');
   if(!canvas) return;
@@ -5732,10 +5747,12 @@ function renderCharts(){
   }
 
   const meses = {};
-  data.lancamentos.filter(l=>l.tipo==='receita'||l.tipo==='despesa').forEach(l => {
+  // Vendas contam como receita e compras como despesa (igual ao card da Home), somando todos os
+  // bancos e Espécie juntos.
+  data.lancamentos.filter(l=>l.tipo==='receita'||l.tipo==='venda'||l.tipo==='despesa'||l.tipo==='compra').forEach(l => {
     const mk = l.data.slice(0,7);
     if(!meses[mk]) meses[mk] = {receita:0, despesa:0};
-    meses[mk][l.tipo] += Number(l.valor);
+    meses[mk][(l.tipo==='receita'||l.tipo==='venda') ? 'receita' : 'despesa'] += Number(l.valor);
   });
   const mesesOrdenados = Object.keys(meses).sort().slice(-6);
   if(charts.fluxo) charts.fluxo.destroy();
