@@ -670,7 +670,7 @@
        escondidos na Home e só abrem numa janela (#painelModal) ao tocar no emblema correspondente.
        Cartões e Pé de Meia continuam sempre visíveis, logo abaixo da fileira de emblemas. */
     #panelDespesasCategoria, #panelReceitaDespesa,
-    #panelConta, #panelDividas, #panelEstoque{ display:none; }
+    #panelConta, #panelDividas, #panelEstoque, #panelPedidos{ display:none; }
     .emblemas-row{ display:flex; justify-content:center; gap:14px; overflow-x:auto; padding:4px 2px 12px; margin-bottom:6px; -webkit-overflow-scrolling:touch; }
 
     .modal-card, .page-view .view-card{ padding:14px; }
@@ -1093,6 +1093,10 @@
     <span class="emblema-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11v10"/></svg></span>
     <span class="emblema-label">Estoque</span>
   </button>
+  <button class="emblema-btn" onclick="abrirPainelModal('panelPedidos')">
+    <span class="emblema-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6v3H9z"/><path d="M9 12h6M9 16h4"/></svg></span>
+    <span class="emblema-label">Pedidos</span>
+  </button>
 </div>
 
 <div class="panel row-gap" id="panelCartoes">
@@ -1231,6 +1235,40 @@
       <div id="estoqueList"></div>
       <div class="totals-line"><span>Valor total em estoque</span><span id="estoqueTotal" class="blur-target">R$ 0,00</span></div>
     </div>
+    </div>
+  </div>
+</div>
+
+<div class="grid2 row-gap">
+  <div class="panel" id="panelPedidos" style="grid-column: 1 / -1;">
+    <h2><span class="title"><span class="h2-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6v3H9z"/><path d="M9 12h6M9 16h4"/></svg></span> Pedidos</span>
+      <span class="h2-actions">
+        <button class="secondary small" onclick="abrirFormPedido(null)">+ Novo pedido</button>
+      </span>
+    </h2>
+    <div class="panel-body">
+    <div class="hint" style="margin-bottom:10px;">Anote os pedidos dos clientes e acompanhe o andamento. Isso não altera estoque nem lançamentos.</div>
+    <div id="pedidosFiltrosExtras" style="display:none; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
+      <div class="field" style="min-width:150px;">
+        <label>Situação</label>
+        <select id="pedidosFiltroStatus" onchange="mudarFiltroStatusPedidos(this.value)">
+          <option value="abertos">Em aberto</option>
+          <option value="">Todos</option>
+          <option value="pendente">Pendente</option>
+          <option value="andamento">Em andamento</option>
+          <option value="entregue">Entregue</option>
+          <option value="cancelado">Cancelado</option>
+        </select>
+      </div>
+      <div class="field" style="min-width:160px;">
+        <label>Cliente</label>
+        <input type="text" id="pedidosFiltroCliente" placeholder="Buscar cliente..." oninput="mudarFiltroClientePedidos(this.value)">
+      </div>
+    </div>
+    <div class="totals-line" style="margin-bottom:0;">
+      <span id="pedidosResumo">Nenhum pedido anotado</span>
+    </div>
+    <div id="pedidosList" style="margin-top:10px;"></div>
     </div>
   </div>
 </div>
@@ -1385,6 +1423,35 @@
         <input type="number" step="0.01" min="0" id="produtoQuantidade" required>
         <div class="hint" id="produtoQuantidadeHint" style="display:none;">A quantidade comprada é lançada na própria compra — aqui fica 0 pra não contar em dobro.</div>
       </div>
+      <button type="submit">Salvar</button>
+    </form>
+  </div>
+</div>
+
+<div id="pedidoFormModal" class="modal-overlay" onclick="if(event.target===this) fecharFormPedido()">
+  <div class="modal-card" style="max-width:420px;">
+    <div class="modal-header">
+      <h3 id="pedidoFormTitulo">Novo pedido</h3>
+      <button class="modal-close-btn" onclick="fecharFormPedido()" title="Fechar" aria-label="Fechar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <form class="inline" id="pedidoForm">
+      <div class="field"><label>Cliente</label><input type="text" id="pedidoCliente" required list="pedidoClientesLista" autocomplete="off"><datalist id="pedidoClientesLista"></datalist></div>
+      <div class="field"><label>Pedido</label><textarea id="pedidoDescricao" rows="3" required placeholder="Ex.: 2 camisas M do Flamengo, 1 boné"></textarea></div>
+      <div class="field"><label>Valor (R$, opcional)</label><input type="number" step="0.01" min="0" id="pedidoValor"></div>
+      <div class="field"><label>Data do pedido</label><input type="date" id="pedidoData" required></div>
+      <div class="field"><label>Previsão de entrega (opcional)</label><input type="date" id="pedidoPrevisao"></div>
+      <div class="field">
+        <label>Situação</label>
+        <select id="pedidoStatus">
+          <option value="pendente">Pendente</option>
+          <option value="andamento">Em andamento</option>
+          <option value="entregue">Entregue</option>
+          <option value="cancelado">Cancelado</option>
+        </select>
+      </div>
+      <div class="field"><label>Observações (opcional)</label><textarea id="pedidoObs" rows="2"></textarea></div>
       <button type="submit">Salvar</button>
     </form>
   </div>
@@ -2872,6 +2939,7 @@ auth.onAuthStateChanged(function(user){
         if(!data.metasInvestimento) data.metasInvestimento = [];
         if(!data.produtos) data.produtos = [];
         if(!data.times) data.times = [];
+        if(!data.pedidos) data.pedidos = [];
         lastKnownRev = data._rev || 0;
       } else if(snap.metadata.fromCache){
         // Sem persistência offline habilitada, o PRIMEIRO snapshot pode vir do cache local
@@ -5140,6 +5208,7 @@ function renderAll(){
   renderCharts();
   renderDividas();
   renderEstoque();
+  renderPedidos();
   renderInvestimentos();
   renderContaPanel();
   renderCartoesPanel();
@@ -5641,7 +5710,7 @@ function abrirPainelModal(panelId){
   bloquearScrollFundo();
   // Conta Corrente, Dívidas e Estoque não filtram por mês (são saldo/total acumulados), então o
   // mini calendário só faz sentido para Despesa e Receita x Despesa.
-  const semCalendario = panelId === 'panelConta' || panelId === 'panelDividas' || panelId === 'panelEstoque';
+  const semCalendario = panelId === 'panelConta' || panelId === 'panelDividas' || panelId === 'panelEstoque' || panelId === 'panelPedidos';
   document.getElementById('filtroMesHome').style.display = semCalendario ? 'none' : '';
   // Mover o painel para dentro do modal não dispara o auto-resize do Chart.js (o gráfico foi
   // criado enquanto o painel estava com display:none), então recriamos os gráficos agora que o
@@ -5993,6 +6062,150 @@ function reporEstoque(id){
   produto.quantidade = Number((Number(produto.quantidade) + qtd).toFixed(3));
   saveData();
   renderEstoque();
+}
+
+// ---------- Pedidos (anotações de pedidos de clientes — não mexe em estoque nem em lançamentos) ----------
+let filtroStatusPedidos = 'abertos';
+let filtroClientePedidos = '';
+let editingPedidoId = null;
+const PEDIDO_STATUS = { pendente: 'Pendente', andamento: 'Em andamento', entregue: 'Entregue', cancelado: 'Cancelado' };
+
+function escPedido(s){
+  return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function dataBrPedido(iso){
+  if(!iso) return '';
+  const p = String(iso).split('-');
+  return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : iso;
+}
+function mudarFiltroStatusPedidos(v){ filtroStatusPedidos = v; renderPedidos(); }
+function mudarFiltroClientePedidos(v){ filtroClientePedidos = v.trim().toLowerCase(); renderPedidos(); }
+
+function renderPedidos(){
+  const list = document.getElementById('pedidosList');
+  if(!list) return;
+  const todos = data.pedidos || [];
+  document.getElementById('pedidosFiltrosExtras').style.display = todos.length ? 'flex' : 'none';
+  let itens = todos.slice();
+  if(filtroStatusPedidos === 'abertos') itens = itens.filter(p => p.status === 'pendente' || p.status === 'andamento');
+  else if(filtroStatusPedidos) itens = itens.filter(p => p.status === filtroStatusPedidos);
+  if(filtroClientePedidos) itens = itens.filter(p => (p.cliente || '').toLowerCase().includes(filtroClientePedidos));
+  // Em aberto primeiro, com a previsão de entrega mais próxima no topo; depois o resto, do mais novo ao mais antigo.
+  const aberto = p => p.status === 'pendente' || p.status === 'andamento';
+  itens.sort((a,b) => {
+    if(aberto(a) !== aberto(b)) return aberto(a) ? -1 : 1;
+    if(aberto(a)){
+      const pa = a.previsao || '9999-99-99', pb = b.previsao || '9999-99-99';
+      if(pa !== pb) return pa.localeCompare(pb);
+    }
+    return (b.data || '').localeCompare(a.data || '');
+  });
+  const hoje = new Date().toISOString().slice(0,10);
+  if(itens.length === 0){
+    const filtrado = filtroClientePedidos || filtroStatusPedidos !== 'abertos';
+    list.innerHTML = '<div class="empty">' + (todos.length === 0 ? 'Nenhum pedido anotado.' : (filtrado ? 'Nenhum pedido encontrado para esse filtro.' : 'Nenhum pedido em aberto.')) + '</div>';
+  } else {
+    list.innerHTML = itens.map(p => {
+      const atrasado = aberto(p) && p.previsao && p.previsao < hoje;
+      const meta = [
+        PEDIDO_STATUS[p.status] || p.status,
+        'pedido em ' + dataBrPedido(p.data),
+        p.previsao ? 'entrega ' + dataBrPedido(p.previsao) + (atrasado ? ' (atrasado)' : '') : ''
+      ].filter(Boolean).join(' • ');
+      const acoesStatus = aberto(p)
+        ? (p.status === 'pendente' ? `<button onclick="mudarStatusPedido('${p.id}','andamento')">Marcar em andamento</button>` : '')
+          + `<button onclick="mudarStatusPedido('${p.id}','entregue')">Marcar entregue</button>`
+        : `<button onclick="mudarStatusPedido('${p.id}','pendente')">Reabrir</button>`;
+      return `
+      <div class="list-item">
+        <div>
+          <div><strong>${escPedido(p.cliente)}</strong> — ${escPedido(p.descricao)}</div>
+          <div class="meta"${atrasado ? ' style="color:var(--red);"' : ''}>${escPedido(meta)}</div>
+          ${p.obs ? `<div class="meta">${escPedido(p.obs)}</div>` : ''}
+        </div>
+        <div class="actions">
+          ${p.valor ? `<span class="info blur-target" style="margin-right:6px;">${fmt(Number(p.valor))}</span>` : ''}
+          <div class="row-menu-wrap">
+            <button class="row-menu-btn" onclick="toggleRowMenu(this, event)" title="Mais ações">⋮</button>
+            <div class="row-menu">
+              ${acoesStatus}
+              <button onclick="abrirFormPedido('${p.id}')">Editar</button>
+              <button class="row-menu-danger" onclick="excluirPedido('${p.id}')">Excluir</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+  const abertos = todos.filter(aberto);
+  const valorAberto = abertos.reduce((s,p) => s + Number(p.valor || 0), 0);
+  document.getElementById('pedidosResumo').textContent = todos.length === 0
+    ? 'Nenhum pedido anotado'
+    : abertos.length + (abertos.length === 1 ? ' pedido em aberto' : ' pedidos em aberto') + (valorAberto ? ' • ' + fmt(valorAberto) : '');
+}
+
+function abrirFormPedido(id){
+  // Mesmo motivo do Estoque: no celular o painel é um overlay e ficaria por cima do modal.
+  if(typeof fecharPainelModal === 'function') fecharPainelModal();
+  editingPedidoId = id;
+  const p = id ? (data.pedidos || []).find(x => x.id === id) : null;
+  document.getElementById('pedidoFormTitulo').textContent = p ? 'Editar pedido' : 'Novo pedido';
+  document.getElementById('pedidoCliente').value = p ? p.cliente : '';
+  document.getElementById('pedidoDescricao').value = p ? p.descricao : '';
+  document.getElementById('pedidoValor').value = p && p.valor ? p.valor : '';
+  document.getElementById('pedidoData').value = p ? p.data : new Date().toISOString().slice(0,10);
+  document.getElementById('pedidoPrevisao').value = p ? (p.previsao || '') : '';
+  document.getElementById('pedidoStatus').value = p ? p.status : 'pendente';
+  document.getElementById('pedidoObs').value = p ? (p.obs || '') : '';
+  const clientes = Array.from(new Set((data.pedidos || []).map(x => x.cliente).filter(Boolean))).sort();
+  document.getElementById('pedidoClientesLista').innerHTML = clientes.map(c => '<option value="' + escPedido(c) + '">').join('');
+  document.getElementById('pedidoFormModal').style.display = 'flex';
+  bloquearScrollFundo();
+}
+
+function fecharFormPedido(){
+  document.getElementById('pedidoFormModal').style.display = 'none';
+  liberarScrollFundo();
+  editingPedidoId = null;
+}
+
+document.getElementById('pedidoForm').addEventListener('submit', function(e){
+  e.preventDefault();
+  const cliente = document.getElementById('pedidoCliente').value.trim();
+  const descricao = document.getElementById('pedidoDescricao').value.trim();
+  const valor = Number(document.getElementById('pedidoValor').value) || 0;
+  const dataPedido = document.getElementById('pedidoData').value;
+  const previsao = document.getElementById('pedidoPrevisao').value;
+  const status = document.getElementById('pedidoStatus').value;
+  const obs = document.getElementById('pedidoObs').value.trim();
+  if(!cliente || !descricao || !dataPedido || valor < 0) return;
+  if(!data.pedidos) data.pedidos = [];
+  if(editingPedidoId){
+    const p = data.pedidos.find(x => x.id === editingPedidoId);
+    if(p) Object.assign(p, { cliente, descricao, valor, data: dataPedido, previsao, status, obs });
+  } else {
+    data.pedidos.push({ id: uid(), cliente, descricao, valor, data: dataPedido, previsao, status, obs, criadoEm: new Date().toISOString() });
+  }
+  saveData();
+  renderPedidos();
+  fecharFormPedido();
+});
+
+function mudarStatusPedido(id, status){
+  const p = (data.pedidos || []).find(x => x.id === id);
+  if(!p) return;
+  p.status = status;
+  saveData();
+  renderPedidos();
+}
+
+function excluirPedido(id){
+  const p = (data.pedidos || []).find(x => x.id === id);
+  if(!p) return;
+  if(!confirm('Excluir o pedido de "' + p.cliente + '"?')) return;
+  data.pedidos = data.pedidos.filter(x => x.id !== id);
+  saveData();
+  renderPedidos();
 }
 
 // ---------- Times (categorias de produto, ex: times de futebol numa loja de mantos) ----------
